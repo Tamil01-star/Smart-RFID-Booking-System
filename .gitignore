@@ -1,0 +1,61 @@
+# Dependencies
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Environment variables (NEVER commit these)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Firebase config (add your own)
+**/firebase-config.js
+**/serviceAccountKey.json
+
+# Editor
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Build outputs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Temp / AI generated workspace
+.gemini/
+*.gemini
+
+# Large binary files
+*.pptx
+*.mp4
+*.pdf
+*.exe
+*.zip
+
+# Keep project-specific images but not generated ones
+lcd_keypad_flow_*.jpg
+smart_bus_*_*.jpg
+ai_innovations_*.pdf
+complete_project_*.pdf
+review1_*.pdf
+rfid_payment_*.pdf
+smart_hospital_*.pdf
+smart_bus_full_circuit_*.jpg
+smart_bus_flow_block_*.jpg
+smart_bus_graphical_*.jpg
+smart_bus_no_led_*.jpg
+smart_bus_block_*.jpg
