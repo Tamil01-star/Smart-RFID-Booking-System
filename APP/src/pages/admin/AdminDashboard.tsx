@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Users, Bus, Ticket, TrendingUp, CreditCard, AlertCircle, Cpu, ArrowUpRight } from 'lucide-react';
+import { Users, Bus, Ticket, TrendingUp, CreditCard, Cpu, ArrowUpRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { busService, bookingService, transactionService, rfidService } from '../../services';
 import { DEMO_USERS, DEMO_LOGS } from '../../data/mockData';
@@ -101,7 +101,7 @@ export default function AdminDashboard() {
               <YAxis tick={{ fontSize: 12, fill: '#9ca3af' }} />
               <Tooltip
                 contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', fontSize: 13 }}
-                formatter={(value: number) => [`₹${value}`, 'Revenue']}
+                formatter={(value: any) => [`₹${value}`, 'Revenue']}
               />
               <Bar dataKey="revenue" fill="#1e3a8a" radius={[4, 4, 0, 0]} />
             </BarChart>
