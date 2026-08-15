@@ -10,9 +10,8 @@
 const char* ssid = "YOUR_WIFI_SSID";
 const char* password = "YOUR_WIFI_PASSWORD";
 
-// Vercel API Endpoint (Replace with your actual Vercel Domain)
-// e.g., https://smart-rfid-booking-system.vercel.app/api/hardware/scan
-const char* api_url = "https://YOUR_VERCEL_APP_URL/api/hardware/scan";
+// Vercel API Endpoint
+const char* api_url = "https://smart-rfid-booking-system-tawny.vercel.app/api/hardware/scan";
 
 const int BUS_ID = 1; // ID of the bus this ESP32 is installed in
 
