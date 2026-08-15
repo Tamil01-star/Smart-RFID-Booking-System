@@ -64,6 +64,12 @@ int fares[NUM_DESTINATIONS] = {15, 30, 42, 57}; // Demo: Student 50% fares from 
 
 int simulatedWalletBalance = 150; // Try changing to 20 to test Low Balance path
 
+#include <WiFi.h>
+
+// WiFi Credentials
+const char* ssid = "ZENKAI_MONARCH";
+const char* password = "********";
+
 // ==========================================
 // SETUP & INITIALIZATION
 // ==========================================
@@ -82,12 +88,28 @@ void setup() {
   lcd.setCursor(0, 0);
   lcd.print("Smart Bus System");
   lcd.setCursor(0, 1);
-  lcd.print("Initializing...");
+  lcd.print("Connecting WiFi.");
+  
+  // Connect to WiFi
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi Connected!");
+  Serial.print("IP Address: ");
+  Serial.println(WiFi.localIP());
+  
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("WiFi Connected!");
+  delay(1000);
   
   SPI.begin();
   rfid.PCD_Init();
   
-  delay(2000);
+  delay(1000);
   changeState(STATE_STANDBY);
 }
 
@@ -96,6 +118,13 @@ void setup() {
 // ==========================================
 void loop() {
   char key = keypad.getKey();
+  
+  // Print ANY key pressed to the Serial Monitor for debugging
+  if (key) {
+    Serial.print("Keypad Pressed: ");
+    Serial.println(key);
+  }
+
   unsigned long currentTime = millis();
   unsigned long elapsedTime = currentTime - stateStartTime;
 
@@ -108,11 +137,19 @@ void loop() {
         lcd.print("SmartBus Ready");
         lcd.setCursor(0, 1);
         lcd.print("Tap RFID to Board");
+        Serial.println("Entered STATE_STANDBY. Waiting for RFID or Keypad...");
         stateJustChanged = false;
+      }
+      
+      // Allow user to bypass RFID by just pressing 'A' from standby
+      if (key == 'A') {
+         Serial.println("Manual override: 'A' pressed in standby.");
+         changeState(STATE_WALKIN_PROMPT);
       }
       
       // Simulate RFID tap for Walk-in flow (No Booking Found)
       if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
+        Serial.println("RFID Card Detected!");
         rfid.PICC_HaltA();
         rfid.PCD_StopCrypto1();
         changeState(STATE_RFID_SCANNED_NO_BOOKING);
@@ -127,9 +164,21 @@ void loop() {
         lcd.print("RFID Scanned");
         lcd.setCursor(0, 1);
         lcd.print("No Booking Found");
+        
+        // Immediate physical feedback: Blink for 2 seconds
+        Serial.println("Blinking Green LED and Buzzer for 2 seconds...");
+        for (int i = 0; i < 2; i++) {
+          digitalWrite(GREEN_LED, HIGH);
+          digitalWrite(BUZZER, HIGH);
+          delay(500); 
+          digitalWrite(BUZZER, LOW);
+          digitalWrite(GREEN_LED, LOW);
+          delay(500); 
+        }
+        
         stateJustChanged = false;
       }
-      if (elapsedTime >= 1500) {
+      if (elapsedTime >= 2000) {
         changeState(STATE_WALKIN_PROMPT);
       }
       break;
