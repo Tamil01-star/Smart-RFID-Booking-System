@@ -7,6 +7,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  loginWithRFID: (uid: string) => Promise<{ success: boolean; error?: string }>;
   register: (data: RegisterData) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   updateUser: (updates: Partial<User>) => void;
@@ -98,6 +99,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { success: false, error: 'No account found with this email. Please register first.' };
   };
 
+  const loginWithRFID = async (uid: string) => {
+    const rfidCards = JSON.parse(localStorage.getItem('smartbus_rfid_cards') || '[]');
+    // also add demo card support
+    if (uid === 'A1B2C3D4') {
+      rfidCards.push({ uid: 'A1B2C3D4', passengerId: 'SBP10001', status: 'active' });
+    }
+    const card = rfidCards.find((c: any) => c.uid === uid && c.status === 'active');
+    
+    if (!card || !card.passengerId) {
+      return { success: false, error: 'Invalid or unregistered RFID card.' };
+    }
+    
+    const users = getStoredUsers();
+    const foundUser = users.find(u => u.passengerId === card.passengerId);
+    
+    if (foundUser) {
+      setUser(foundUser);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(foundUser));
+      return { success: true };
+    }
+    
+    return { success: false, error: 'User associated with this card not found.' };
+  };
+
   const register = async (data: RegisterData) => {
     const users = getStoredUsers();
     
@@ -157,7 +182,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider value={{
-      user, isAuthenticated: !!user, isLoading, login, register, logout, updateUser
+      user, isAuthenticated: !!user, isLoading, login, loginWithRFID, register, logout, updateUser
     }}>
       {children}
     </AuthContext.Provider>

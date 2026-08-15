@@ -91,20 +91,32 @@ void setup() {
   lcd.print("Connecting WiFi.");
   
   // Connect to WiFi
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
+  delay(100);
   WiFi.begin(ssid, password);
+  
   Serial.print("Connecting to WiFi");
-  while (WiFi.status() != WL_CONNECTED) {
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) { // 10 second timeout
     delay(500);
     Serial.print(".");
+    attempts++;
   }
-  Serial.println("\nWiFi Connected!");
-  Serial.print("IP Address: ");
-  Serial.println(WiFi.localIP());
   
   lcd.clear();
   lcd.setCursor(0, 0);
-  lcd.print("WiFi Connected!");
-  delay(1000);
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWiFi Connected!");
+    Serial.print("IP Address: ");
+    Serial.println(WiFi.localIP());
+    lcd.print("WiFi Connected!");
+  } else {
+    Serial.println("\nWiFi Failed!");
+    lcd.print("WiFi Failed!");
+  }
+  
+  delay(1500);
   
   SPI.begin();
   rfid.PCD_Init();
