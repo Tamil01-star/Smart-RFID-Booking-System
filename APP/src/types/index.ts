@@ -18,6 +18,11 @@ export interface User {
 // ==================== BUS TYPES ====================
 export type BusStatus = 'active' | 'inactive' | 'full' | 'scheduled';
 
+export interface StopFare {
+  stopName: string;
+  fare: number;
+}
+
 export interface Bus {
   id: string;
   busNumber: string;
@@ -31,6 +36,7 @@ export interface Bus {
   availableSeats: number;
   status: BusStatus;
   route?: string;
+  stopsWithFares?: StopFare[];
 }
 
 // ==================== BOOKING TYPES ====================
