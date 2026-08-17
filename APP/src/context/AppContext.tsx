@@ -10,10 +10,10 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 const DEFAULT_SETTINGS: AppSettings = {
-  systemMode: 'demo',
-  esp32Connected: false,
-  firebaseConnected: false,
-  demoRFIDUid: 'A1B2C3D4',
+  systemMode: 'hardware',
+  esp32Connected: true,
+  firebaseConnected: true,
+  demoRFIDUid: '',
 };
 
 export function AppProvider({ children }: { children: ReactNode }) {

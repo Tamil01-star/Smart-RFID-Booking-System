@@ -1,19 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { CreditCard, Link2, Unlink, Zap, CheckCircle, AlertCircle, Cpu } from 'lucide-react';
+import { CreditCard, Link2, Unlink, CheckCircle, Cpu } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { rfidService } from '../../services';
 import { RFIDCard } from '../../types';
-import { useApp } from '../../context/AppContext';
 import toast from 'react-hot-toast';
 
 export default function RFIDManagement() {
   const { user, updateUser } = useAuth();
-  const { settings } = useApp();
   const [card, setCard] = useState<RFIDCard | null>(null);
   const [loading, setLoading] = useState(true);
   const [uid, setUid] = useState('');
   const [linking, setLinking] = useState(false);
-  const [simulating, setSimulating] = useState(false);
 
   const load = async () => {
     if (!user) return;
@@ -49,15 +46,6 @@ export default function RFIDManagement() {
     updateUser({ rfidUid: undefined });
     await load();
     toast.success('RFID card unlinked');
-  };
-
-  const handleSimulate = () => {
-    setSimulating(true);
-    setTimeout(() => {
-      setUid(settings.demoRFIDUid);
-      setSimulating(false);
-      toast.success(`Demo RFID UID: ${settings.demoRFIDUid} — Click "Link Card" to complete linking`);
-    }, 1500);
   };
 
   if (loading) return <div className="flex justify-center py-20"><div className="animate-spin rounded-full h-10 w-10 border-4 border-primary-800 border-t-transparent" /></div>;
@@ -117,14 +105,6 @@ export default function RFIDManagement() {
             Link RFID Card
           </h2>
 
-          <div className="demo-banner mb-4">
-            <Zap className="w-4 h-4 flex-shrink-0" />
-            <div>
-              <strong>Demo Mode:</strong> Enter an RFID UID manually. In hardware mode, the UID will be automatically received from{' '}
-              <span className="font-mono">MFRC522 → ESP32 → Firebase</span>
-            </div>
-          </div>
-
           <div className="space-y-4">
             <div>
               <label className="input-label">RFID Card UID</label>
@@ -143,17 +123,6 @@ export default function RFIDManagement() {
                 </button>
               </div>
             </div>
-
-            <div className="border-t border-gray-100 pt-4">
-              <button onClick={handleSimulate} disabled={simulating} className="btn-secondary gap-2">
-                {simulating ? (
-                  <><span className="animate-spin inline-block w-4 h-4 border-2 border-gray-300 border-t-gray-600 rounded-full" />Simulating scan...</>
-                ) : (
-                  <><Cpu className="w-4 h-4" />Simulate RFID Scan</>
-                )}
-              </button>
-              <p className="text-xs text-gray-400 mt-2">Simulates an RFID card tap using the demo UID: <code className="font-mono">{settings.demoRFIDUid}</code></p>
-            </div>
           </div>
         </div>
       )}
@@ -167,10 +136,10 @@ export default function RFIDManagement() {
         <div className="space-y-2 text-sm text-blue-800">
           {[
             'Your RFID card uses 13.56 MHz technology (compatible with MFRC522 reader)',
-            'The UID (Unique Identifier) on your card is stored in Firebase against your passenger account',
-            'When you tap your card on the bus, ESP32 reads the UID and verifies your booking + wallet balance',
+            'The UID (Unique Identifier) on your card is stored in the database against your passenger account',
+            'When you tap your card on the bus, the ESP32 reads the UID and verifies your booking + wallet balance',
             'Fare is automatically deducted from your wallet upon successful verification',
-            'Your card does NOT store the wallet balance — the balance is stored securely in Firebase',
+            'Your card does NOT store the wallet balance — the balance is stored securely in the database',
           ].map((text, i) => (
             <div key={i} className="flex items-start gap-2">
               <CheckCircle className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
