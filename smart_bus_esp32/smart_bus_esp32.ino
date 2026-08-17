@@ -1,8 +1,17 @@
+#include <WiFi.h>
+#include <HTTPClient.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 #include <SPI.h>
 #include <MFRC522.h>
 #include <Keypad.h>
+
+// WiFi Credentials
+const char* ssid = "ZENKAI_MONARCH";
+const char* password = "********";
+
+// LIVE API Endpoint
+const char* apiEndpoint = "https://smart-rfid-booking-system-tawny.vercel.app/api/hardware/scan";
 
 // ==========================================
 // PIN DEFINITIONS
@@ -33,13 +42,46 @@ MFRC522 rfid(SS_PIN, RST_PIN);
 Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
 
 // ==========================================
+// PASSENGER CATEGORIES & PRICING
+// ==========================================
+enum PassengerCategory {
+  CAT_GENERAL,       // 100% Fare
+  CAT_STUDENT,       // 50% Fare
+  CAT_SENIOR,        // 40% Fare
+  CAT_DISABLED,      // 25% Fare
+  CAT_EX_SERVICEMAN  // Free (0)
+};
+
+PassengerCategory currentCategory = CAT_GENERAL;
+
+int calculateFare(int baseFare, PassengerCategory category) {
+  switch(category) {
+    case CAT_STUDENT: return baseFare * 0.50; 
+    case CAT_SENIOR: return baseFare * 0.40;
+    case CAT_DISABLED: return baseFare * 0.25;
+    case CAT_EX_SERVICEMAN: return 0;
+    case CAT_GENERAL:
+    default: return baseFare;
+  }
+}
+
+void cycleCategory() {
+  currentCategory = (PassengerCategory)(((int)currentCategory + 1) % 5);
+  Serial.print("Demo Mode: Switched to Category ID ");
+  Serial.println((int)currentCategory);
+}
+
+// ==========================================
 // STATE MACHINE CONFIGURATION
 // ==========================================
 enum SystemState {
   STATE_STANDBY,
+  STATE_VERIFYING_RFID_API,
   STATE_RFID_SCANNED_NO_BOOKING,
   STATE_RFID_SCANNED_BOOKED,
+  STATE_RFID_LOW_BALANCE,
   STATE_WALKIN_PROMPT,
+  STATE_MULTIPLE_BOOKING_PROMPT,
   STATE_BOARDING_LOC,
   STATE_DEST_MENU,
   STATE_SELECTED_CONFIRM,
@@ -52,25 +94,23 @@ enum SystemState {
   STATE_TIMEOUT
 };
 
+// Manually declare prototype to fix Arduino IDE compilation error
+void changeState(SystemState newState);
+
 SystemState currentState = STATE_STANDBY;
 bool stateJustChanged = true;
 unsigned long stateStartTime = 0;
-bool demoPreBookedToggle = false; // Toggles every scan for easy testing
 
-// Walk-in Booking Variables
+// Booking Variables
+String lastScannedUID = "";
+int ticketCount = 1;
 int currentDestIndex = 0; 
 const int NUM_DESTINATIONS = 4;
 String destinations[NUM_DESTINATIONS] = {"1.Tiruchengode", "2.Erode", "3.Tiruppur", "4.Coimbatore"};
-String shortNames[NUM_DESTINATIONS] = {"Tiruchengode", "Erode", "Tiruppur", "Coimbatore"};
-int fares[NUM_DESTINATIONS] = {15, 30, 42, 57}; // Demo: Student 50% fares from PDF
+String shortNames[NUM_DESTINATIONS] = {"T.Gode", "Erode", "T.Pur", "CBE"}; // Shortened to fit 16x2 LCD
 
-int simulatedWalletBalance = 150; // Try changing to 20 to test Low Balance path
-
-#include <WiFi.h>
-
-// WiFi Credentials
-const char* ssid = "ZENKAI_MONARCH";
-const char* password = "********";
+int baseFares[NUM_DESTINATIONS] = {30, 60, 85, 115}; 
+int simulatedWalletBalance = 300;
 
 // ==========================================
 // SETUP & INITIALIZATION
@@ -92,7 +132,6 @@ void setup() {
   lcd.setCursor(0, 1);
   lcd.print("Connecting WiFi.");
   
-  // Connect to WiFi
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
   delay(100);
@@ -100,7 +139,7 @@ void setup() {
   
   Serial.print("Connecting to WiFi");
   int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 20) { // 10 second timeout
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) { // 10s timeout
     delay(500);
     Serial.print(".");
     attempts++;
@@ -110,8 +149,6 @@ void setup() {
   lcd.setCursor(0, 0);
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println("\nWiFi Connected!");
-    Serial.print("IP Address: ");
-    Serial.println(WiFi.localIP());
     lcd.print("WiFi Connected!");
   } else {
     Serial.println("\nWiFi Failed!");
@@ -133,7 +170,6 @@ void setup() {
 void loop() {
   char key = keypad.getKey();
   
-  // Print ANY key pressed to the Serial Monitor for debugging
   if (key) {
     Serial.print("Keypad Pressed: ");
     Serial.println(key);
@@ -151,29 +187,102 @@ void loop() {
         lcd.print("SmartBus Ready");
         lcd.setCursor(0, 1);
         lcd.print("Tap RFID to Board");
-        Serial.println("Entered STATE_STANDBY. Waiting for RFID or Keypad...");
         stateJustChanged = false;
       }
       
-      // Allow user to bypass RFID by just pressing 'A' from standby
       if (key == 'A') {
-         Serial.println("Manual override: 'A' pressed in standby.");
+         ticketCount = 1;
+         cycleCategory(); 
          changeState(STATE_WALKIN_PROMPT);
+      } else if (key == 'B') {
+         cycleCategory(); 
+         changeState(STATE_MULTIPLE_BOOKING_PROMPT);
       }
       
-      // Simulate RFID tap
+      // LIVE RFID TAP
       if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
+        lastScannedUID = "";
+        for (byte i = 0; i < rfid.uid.size; i++) {
+          lastScannedUID += String(rfid.uid.uidByte[i] < 0x10 ? "0" : "");
+          lastScannedUID += String(rfid.uid.uidByte[i], HEX);
+        }
+        lastScannedUID.toUpperCase(); // e.g. "A1B2C3D4"
+
         rfid.PICC_HaltA();
         rfid.PCD_StopCrypto1();
         
-        // Alternate between Booked and Not Booked for easy demonstration
-        demoPreBookedToggle = !demoPreBookedToggle;
+        changeState(STATE_VERIFYING_RFID_API);
+      }
+      break;
+
+    // ----------------------------------------------------
+    case STATE_VERIFYING_RFID_API:
+      if (stateJustChanged) {
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Checking DB...");
+        lcd.setCursor(0, 1);
+        lcd.print("Please wait...");
         
-        if (demoPreBookedToggle) {
-          changeState(STATE_RFID_SCANNED_BOOKED);
+        if (WiFi.status() == WL_CONNECTED) {
+          HTTPClient http;
+          http.begin(apiEndpoint);
+          http.addHeader("Content-Type", "application/json");
+          
+          String httpRequestData = "{\"uid\":\"" + lastScannedUID + "\",\"bus_id\":\"1\"}";
+          Serial.print("Sending POST: ");
+          Serial.println(httpRequestData);
+          
+          int httpResponseCode = http.POST(httpRequestData);
+          
+          if (httpResponseCode > 0) {
+            String payload = http.getString();
+            Serial.print("HTTP Response code: ");
+            Serial.println(httpResponseCode);
+            Serial.println(payload);
+            
+            if (httpResponseCode == 200) {
+               changeState(STATE_RFID_SCANNED_BOOKED);
+            } else if (httpResponseCode == 402) {
+               changeState(STATE_RFID_LOW_BALANCE);
+            } else {
+               changeState(STATE_RFID_SCANNED_NO_BOOKING);
+            }
+          } else {
+            Serial.print("Error code: ");
+            Serial.println(httpResponseCode);
+            changeState(STATE_RFID_SCANNED_NO_BOOKING); 
+          }
+          http.end();
         } else {
+          Serial.println("WiFi Disconnected");
           changeState(STATE_RFID_SCANNED_NO_BOOKING);
         }
+        stateJustChanged = false;
+      }
+      break;
+
+    // ----------------------------------------------------
+    case STATE_RFID_LOW_BALANCE:
+      if (stateJustChanged) {
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Insufficient Bal");
+        lcd.setCursor(0, 1);
+        lcd.print("Please Recharge");
+        
+        digitalWrite(RED_LED, HIGH);
+        for(int i=0; i<3; i++){
+          digitalWrite(BUZZER, HIGH);
+          delay(150);
+          digitalWrite(BUZZER, LOW);
+          delay(150);
+        }
+        stateJustChanged = false;
+      }
+      if (elapsedTime >= 3000) {
+        digitalWrite(RED_LED, LOW);
+        changeState(STATE_STANDBY); // Cannot board
       }
       break;
 
@@ -182,12 +291,10 @@ void loop() {
       if (stateJustChanged) {
         lcd.clear();
         lcd.setCursor(0, 0);
-        lcd.print("RFID Scanned");
+        lcd.print("Not Booked Early");
         lcd.setCursor(0, 1);
-        lcd.print("No Booking Found");
+        lcd.print("Walk-in starts..");
         
-        // Feedback: Red LED + 2 Beeps
-        Serial.println("NO BOOKING: Red LED and 2 Beeps");
         for (int i = 0; i < 2; i++) {
           digitalWrite(RED_LED, HIGH);
           digitalWrite(BUZZER, HIGH);
@@ -200,7 +307,9 @@ void loop() {
         stateJustChanged = false;
       }
       if (elapsedTime >= 1500) {
-        changeState(STATE_WALKIN_PROMPT);
+        ticketCount = 1;
+        cycleCategory(); // Rotate category for Walk-in demo
+        changeState(STATE_WALKIN_PROMPT); 
       }
       break;
 
@@ -209,24 +318,20 @@ void loop() {
       if (stateJustChanged) {
         lcd.clear();
         lcd.setCursor(0, 0);
-        lcd.print("RFID Scanned");
+        lcd.print("ID: " + lastScannedUID); 
         lcd.setCursor(0, 1);
-        lcd.print("Booking Verified");
+        lcd.print("Booked Seat 22B"); 
         
-        // Feedback: Green LED + Long Beep
-        Serial.println("PRE-BOOKED: Green LED and Long Beep");
         digitalWrite(GREEN_LED, HIGH);
         digitalWrite(BUZZER, HIGH);
-        
-        delay(1500); // 1.5 second long beep
-        
+        delay(1000); 
         digitalWrite(BUZZER, LOW);
         digitalWrite(GREEN_LED, LOW);
         
         stateJustChanged = false;
       }
       if (elapsedTime >= 3000) {
-        changeState(STATE_STANDBY); // Passenger boards, reset system
+        changeState(STATE_STANDBY); 
       }
       break;
 
@@ -246,6 +351,25 @@ void loop() {
       break;
 
     // ----------------------------------------------------
+    case STATE_MULTIPLE_BOOKING_PROMPT:
+      if (stateJustChanged) {
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Multiple Booking");
+        lcd.setCursor(0, 1);
+        lcd.print("Tickets(1-9)?");
+        stateJustChanged = false;
+      }
+      if (key >= '1' && key <= '9') {
+        ticketCount = key - '0';
+        changeState(STATE_BOARDING_LOC);
+      } else if (key == 'C') {
+        changeState(STATE_CANCELLED);
+      }
+      if (elapsedTime >= 15000) changeState(STATE_TIMEOUT);
+      break;
+
+    // ----------------------------------------------------
     case STATE_BOARDING_LOC:
       if (stateJustChanged) {
         lcd.clear();
@@ -254,7 +378,7 @@ void loop() {
         lcd.setCursor(0, 1);
         lcd.print("NAMAKKAL");
         stateJustChanged = false;
-        currentDestIndex = 0; // Reset scroll position
+        currentDestIndex = 0; 
       }
       if (elapsedTime >= 2500) changeState(STATE_DEST_MENU);
       break;
@@ -272,17 +396,14 @@ void loop() {
       
       if (key) {
         if (key == '#') {
-          // Scroll forward
           currentDestIndex = (currentDestIndex + 1) % NUM_DESTINATIONS;
           stateJustChanged = true;
         } else if (key == '*') {
-          // Scroll backward
           currentDestIndex = (currentDestIndex - 1 + NUM_DESTINATIONS) % NUM_DESTINATIONS;
           stateJustChanged = true;
         } else if (key == 'C') {
           changeState(STATE_CANCELLED);
         } else if (key >= '1' && key <= '4') {
-          // Check if they pressed the number shown on screen
           int selectedNumber = key - '0';
           if (selectedNumber == (currentDestIndex + 1)) {
             changeState(STATE_SELECTED_CONFIRM);
@@ -312,9 +433,18 @@ void loop() {
       if (stateJustChanged) {
         lcd.clear();
         lcd.setCursor(0, 0);
-        lcd.print(shortNames[currentDestIndex] + ": Rs." + String(fares[currentDestIndex]));
+        
+        int singleFare = calculateFare(baseFares[currentDestIndex], currentCategory);
+        int totalFare = singleFare * ticketCount;
+        
+        if (ticketCount > 1) {
+          lcd.print(String(ticketCount) + " Tkt: Rs." + String(totalFare));
+        } else {
+          lcd.print(shortNames[currentDestIndex] + ": Rs." + String(totalFare));
+        }
+        
         lcd.setCursor(0, 1);
-        lcd.print("A=Yes   C=Cancel");
+        lcd.print("A=Yes C=Cancel"); // Shortened
         stateJustChanged = false;
       }
       if (key == 'A') changeState(STATE_CHECKING_WALLET);
@@ -333,7 +463,10 @@ void loop() {
         stateJustChanged = false;
       }
       if (elapsedTime >= 800) {
-        if (simulatedWalletBalance >= fares[currentDestIndex]) {
+        int singleFare = calculateFare(baseFares[currentDestIndex], currentCategory);
+        int totalFare = singleFare * ticketCount;
+        
+        if (simulatedWalletBalance >= totalFare) {
           changeState(STATE_ALLOCATING_SEAT);
         } else {
           changeState(STATE_LOW_BALANCE);
@@ -359,12 +492,19 @@ void loop() {
       if (stateJustChanged) {
         lcd.clear();
         lcd.setCursor(0, 0);
-        lcd.print("Boarded! Seat22B");
-        lcd.setCursor(0, 1);
-        int remaining = simulatedWalletBalance - fares[currentDestIndex];
-        lcd.print("Bal:Rs." + String(remaining) + " Enjoy!");
+        if (ticketCount > 1) {
+           lcd.print(String(ticketCount) + " Seats Booked!");
+        } else {
+           lcd.print("Boarded! Seat22B");
+        }
         
-        // Success Feedback
+        lcd.setCursor(0, 1);
+        int singleFare = calculateFare(baseFares[currentDestIndex], currentCategory);
+        int totalFare = singleFare * ticketCount;
+        int remaining = simulatedWalletBalance - totalFare;
+        
+        lcd.print("Bal: Rs." + String(remaining)); // Removed "Enjoy!" to fit on screen
+        
         digitalWrite(GREEN_LED, HIGH);
         digitalWrite(BUZZER, HIGH);
         delay(200);
@@ -381,7 +521,10 @@ void loop() {
     // ----------------------------------------------------
     case STATE_LOW_BALANCE:
       if (stateJustChanged) {
-        int shortfall = fares[currentDestIndex] - simulatedWalletBalance;
+        int singleFare = calculateFare(baseFares[currentDestIndex], currentCategory);
+        int totalFare = singleFare * ticketCount;
+        int shortfall = totalFare - simulatedWalletBalance;
+        
         lcd.clear();
         lcd.setCursor(0, 0);
         lcd.print("Low Balance!");
@@ -389,8 +532,6 @@ void loop() {
         lcd.print("Need Rs." + String(shortfall) + " more");
         
         digitalWrite(RED_LED, HIGH);
-        
-        // 3 angry beeps
         for(int i=0; i<3; i++){
           digitalWrite(BUZZER, HIGH);
           delay(100);
@@ -401,13 +542,12 @@ void loop() {
       }
       if (elapsedTime >= 4000) {
         digitalWrite(RED_LED, LOW);
-        // Show Top-up instructions
         lcd.clear();
         lcd.setCursor(0, 0);
         lcd.print("Add money via App");
         lcd.setCursor(0, 1);
         lcd.print("or Counter Recharge");
-        delay(3000); // blocking delay here is fine for simple return
+        delay(3000); 
         changeState(STATE_STANDBY);
       }
       break;
