@@ -36,10 +36,8 @@ export default function Login() {
     }
   };
 
-  const fillDemo = (type: 'passenger' | 'admin' | 'vertex') => {
-    if (type === 'passenger') { setEmail('demo@smartbus.com'); setPassword('demo123'); }
-    else if (type === 'admin') { setEmail('admin@smartbus.com'); setPassword('admin123'); }
-    else { setEmail('vertex'); setPassword('vertex@01'); }
+  const fillDemo = () => {
+    setEmail('demo@smartbus.com'); setPassword('demo123');
     setError('');
   };
 
@@ -68,11 +66,7 @@ export default function Login() {
             <Zap className="w-4 h-4 flex-shrink-0" />
             <div className="flex-1">
               <span className="font-semibold">Demo Mode:</span>{' '}
-              <button onClick={() => fillDemo('passenger')} className="underline font-medium hover:text-amber-900">Passenger</button>
-              {' or '}
-              <button type="button" onClick={() => fillDemo('admin')} className="underline font-medium hover:text-amber-900">Admin</button>
-              {' | '}
-              <button type="button" onClick={() => fillDemo('vertex')} className="underline font-medium hover:text-amber-900">Vertex Admin</button>
+              <button type="button" onClick={fillDemo} className="underline font-medium hover:text-amber-900">Passenger Login</button>
             </div>
           </div>
 
@@ -102,16 +96,16 @@ export default function Login() {
             {loginMethod === 'email' ? (
               <>
                 <div>
-                  <label htmlFor="email" className="input-label">Email Address</label>
+                  <label htmlFor="email" className="input-label">Email Address / Username</label>
                   <input
                     id="email"
-                    type="email"
+                    type="text"
                     value={email}
                     onChange={e => setEmail(e.target.value)}
                     className="input"
-                    placeholder="you@example.com"
+                    placeholder="you@example.com or username"
                     required
-                    autoComplete="email"
+                    autoComplete="username"
                   />
                 </div>
 
