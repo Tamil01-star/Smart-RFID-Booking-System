@@ -7,9 +7,10 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  loginWithRFID: (uid: string) => Promise<{ success: boolean; error?: string }>;
+  loginWithRFID: (uid: string, password?: string) => Promise<{ success: boolean; error?: string }>;
   register: (data: RegisterData) => Promise<{ success: boolean; error?: string }>;
   adminCreatePassenger: (data: any) => Promise<{ success: boolean; error?: string }>;
+  deleteAccount: (userId: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   updateUser: (updates: Partial<User>) => void;
 }
@@ -115,7 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { success: false, error: 'No account found with this email. Please register first.' };
   };
 
-  const loginWithRFID = async (uid: string) => {
+  const loginWithRFID = async (uid: string, password?: string) => {
     const rfidCards = JSON.parse(localStorage.getItem('smartbus_rfid_cards') || '[]');
     // also add demo card support
     if (uid === 'A1B2C3D4') {
@@ -131,6 +132,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const foundUser = users.find(u => u.passengerId === card.passengerId);
     
     if (foundUser) {
+      // Validate password
+      const storedPasswords: Record<string, string> = JSON.parse(
+        localStorage.getItem('smartbus_passwords') || '{}'
+      );
+      
+      // Allow demo user bypass or strict checking for others
+      if (foundUser.email === 'demo@smartbus.com' && password === 'demo123') {
+        // success
+      } else if (storedPasswords[foundUser.id] !== password) {
+        return { success: false, error: 'Incorrect password for this RFID card.' };
+      }
+
       setUser(foundUser);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(foundUser));
       return { success: true };
@@ -219,9 +232,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const updatedUsers = [...users, newUser];
     saveUsers(updatedUsers);
 
-    // Save default password
+    // Save default password as phone number
     const passwords = JSON.parse(localStorage.getItem('smartbus_passwords') || '{}');
-    passwords[newUser.id] = 'smartbus123'; // Default password for admin-created users
+    passwords[newUser.id] = data.phone; 
     localStorage.setItem('smartbus_passwords', JSON.stringify(passwords));
 
     // Initialize wallet
@@ -251,9 +264,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { success: true };
   };
 
+  const deleteAccount = async (userId: string) => {
+    const users = getStoredUsers();
+    const targetUser = users.find(u => u.id === userId);
+    
+    if (!targetUser) return { success: false, error: 'User not found' };
+
+    // 1. Remove from users array
+    const updatedUsers = users.filter(u => u.id !== userId);
+    saveUsers(updatedUsers);
+
+    // 2. Remove password
+    const passwords = JSON.parse(localStorage.getItem('smartbus_passwords') || '{}');
+    delete passwords[userId];
+    localStorage.setItem('smartbus_passwords', JSON.stringify(passwords));
+
+    // 3. Remove wallet
+    const wallets = JSON.parse(localStorage.getItem('smartbus_wallets') || '{}');
+    delete wallets[targetUser.passengerId];
+    localStorage.setItem('smartbus_wallets', JSON.stringify(wallets));
+
+    // 4. Remove linked RFID cards
+    const rfidCards = JSON.parse(localStorage.getItem('smartbus_rfid_cards') || '[]');
+    const updatedCards = rfidCards.filter((c: any) => c.passengerId !== targetUser.passengerId);
+    localStorage.setItem('smartbus_rfid_cards', JSON.stringify(updatedCards));
+
+    // If deleting self, logout
+    if (user?.id === userId) {
+      logout();
+    }
+
+    return { success: true };
+  };
+
   return (
     <AuthContext.Provider value={{
-      user, isAuthenticated: !!user, isLoading, login, loginWithRFID, register, adminCreatePassenger, logout, updateUser
+      user, isAuthenticated: !!user, isLoading, login, loginWithRFID, register, adminCreatePassenger, deleteAccount, logout, updateUser
     }}>
       {children}
     </AuthContext.Provider>

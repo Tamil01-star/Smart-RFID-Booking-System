@@ -24,7 +24,7 @@ export default function Login() {
     if (loginMethod === 'email') {
       result = await login(email.trim(), password);
     } else {
-      result = await loginWithRFID(rfidUid.trim().toUpperCase());
+      result = await loginWithRFID(rfidUid.trim().toUpperCase(), password);
     }
 
     setLoading(false);
@@ -139,25 +139,49 @@ export default function Login() {
                 </div>
               </>
             ) : (
-              <div>
-                <label htmlFor="rfid" className="input-label">RFID Card Number (UID)</label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <CreditCard className="h-5 w-5 text-gray-400" />
+              <div className="space-y-5">
+                <div>
+                  <label htmlFor="rfid" className="input-label">RFID Card Number (UID)</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <CreditCard className="h-5 w-5 text-gray-400" />
+                    </div>
+                    <input
+                      id="rfid"
+                      type="text"
+                      value={rfidUid}
+                      onChange={e => setRfidUid(e.target.value)}
+                      className="input pl-10"
+                      placeholder="e.g. A1B2C3D4"
+                      required
+                    />
                   </div>
-                  <input
-                    id="rfid"
-                    type="text"
-                    value={rfidUid}
-                    onChange={e => setRfidUid(e.target.value)}
-                    className="input pl-10"
-                    placeholder="e.g. A1B2C3D4"
-                    required
-                  />
+                  <p className="mt-2 text-xs text-gray-500">
+                    Demo Card UID: <button type="button" onClick={() => { setRfidUid('A1B2C3D4'); setPassword('demo123'); }} className="font-semibold text-primary-600 hover:underline">A1B2C3D4</button>
+                  </p>
                 </div>
-                <p className="mt-2 text-xs text-gray-500">
-                  Demo Card UID: <button type="button" onClick={() => setRfidUid('A1B2C3D4')} className="font-semibold text-primary-600 hover:underline">A1B2C3D4</button>
-                </p>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label htmlFor="rfid-password" className="input-label mb-0">Password (Phone Number)</label>
+                    <Link to="/forgot-password" className="text-xs text-primary-700 hover:underline">Forgot password?</Link>
+                  </div>
+                  <div className="relative">
+                    <input
+                      id="rfid-password"
+                      type={showPass ? 'text' : 'password'}
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      className="input pr-10"
+                      placeholder="••••••••"
+                      required
+                    />
+                    <button type="button" onClick={() => setShowPass(!showPass)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                      {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
 

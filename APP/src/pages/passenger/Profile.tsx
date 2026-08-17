@@ -4,8 +4,10 @@ import { useAuth } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
 
 export default function Profile() {
-  const { user, updateUser } = useAuth();
+  const { user, updateUser, deleteAccount } = useAuth();
   const [editing, setEditing] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [name, setName] = useState(user?.name || '');
   const [phone, setPhone] = useState(user?.phone || '');
 
@@ -16,8 +18,19 @@ export default function Profile() {
     toast.success('Profile updated successfully');
   };
 
+  const handleDeleteAccount = async () => {
+    if (!user?.id) return;
+    setIsDeleting(true);
+    const result = await deleteAccount(user.id);
+    if (!result.success) {
+      toast.error(result.error || 'Failed to delete account');
+      setIsDeleting(false);
+      setShowDeleteConfirm(false);
+    }
+  };
+
   return (
-    <div className="space-y-6 animate-fade-in max-w-2xl">
+    <div className="space-y-6 animate-fade-in max-w-2xl relative">
       <div className="page-header">
         <h1 className="page-title">Profile</h1>
         <p className="page-subtitle">Manage your account information</p>
@@ -113,6 +126,46 @@ export default function Profile() {
           ))}
         </div>
       </div>
+      <div className="card p-5 bg-red-50/50 border border-red-100">
+        <h3 className="font-semibold text-red-700 mb-2 flex items-center gap-2">
+          <Shield className="w-4 h-4" />
+          Danger Zone
+        </h3>
+        <p className="text-sm text-red-600/80 mb-4">
+          Permanently delete your account and all associated data including wallet balance and RFID links. This action cannot be undone.
+        </p>
+        <button onClick={() => setShowDeleteConfirm(true)} className="px-4 py-2 bg-white text-red-600 border border-red-200 hover:bg-red-50 hover:border-red-300 font-medium rounded-lg text-sm transition-colors shadow-sm">
+          Delete Account
+        </button>
+      </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-gray-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 animate-scale-in">
+            <h3 className="text-xl font-bold text-gray-900 mb-2">Delete Account?</h3>
+            <p className="text-gray-500 text-sm mb-6">
+              Are you sure you want to permanently delete your account? You will lose all your wallet balance and booking history.
+            </p>
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setShowDeleteConfirm(false)} 
+                disabled={isDeleting}
+                className="flex-1 px-4 py-2.5 border border-gray-200 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleDeleteAccount} 
+                disabled={isDeleting}
+                className="flex-1 px-4 py-2.5 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 transition-colors flex items-center justify-center"
+              >
+                {isDeleting ? <span className="animate-spin inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full" /> : 'Yes, Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
