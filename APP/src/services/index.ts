@@ -5,8 +5,7 @@ import {
   Bus, Booking, WalletTransaction, RFIDCard, Wallet,
   TransactionType, TransactionStatus, BookingStatus, LogLevel
 } from '../types';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+import { API_URL } from '../config';
 
 // ==================== BUS SERVICE ====================
 export const busService = {
@@ -94,18 +93,17 @@ export const walletService = {
   },
 
   deductFare: async (passengerId: string, amount: number, busNumber: string, rfidUid?: string): Promise<{ success: boolean; error?: string; wallet?: Wallet }> => {
-    // In real implementation, this is handled on booking create transaction inside the backend.
-    // For manual wallet deduction triggers:
     return { success: true };
   },
+
   refund: async (passengerId: string, amount: number, reason: string): Promise<Wallet> => {
     return walletService.getWallet(passengerId);
-  },};
+  },
+};
 
 // ==================== TRANSACTION SERVICE ====================
 export const transactionService = {
   addTransaction: async (data: any): Promise<WalletTransaction> => {
-    // Handled by the backend trigger
     return data;
   },
 
@@ -184,7 +182,7 @@ export const bookingService = {
   },
 
   updateBookingStatus: async (bookingId: string, status: BookingStatus): Promise<void> => {
-    // Managed on backend cancel/complete routes
+    // Managed on backend
   },
 };
 
