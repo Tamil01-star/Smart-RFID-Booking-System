@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Bus, Eye, EyeOff, Zap, AlertCircle, CreditCard } from 'lucide-react';
+import { Bus, Eye, EyeOff, AlertCircle, CreditCard } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
 
@@ -36,10 +36,7 @@ export default function Login() {
     }
   };
 
-  const fillDemo = () => {
-    setEmail('demo@smartbus.com'); setPassword('demo123');
-    setError('');
-  };
+
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary-50 to-blue-50 flex items-center justify-center px-4 py-12">
@@ -60,15 +57,6 @@ export default function Login() {
         <div className="card p-8 shadow-lg">
           <h2 className="text-2xl font-bold text-gray-900 mb-1">Welcome back</h2>
           <p className="text-sm text-gray-500 mb-6">Sign in to your SMARTBUS+ account</p>
-
-          {/* Demo quick fill */}
-          <div className="demo-banner mb-6">
-            <Zap className="w-4 h-4 flex-shrink-0" />
-            <div className="flex-1">
-              <span className="font-semibold">Demo Mode:</span>{' '}
-              <button type="button" onClick={fillDemo} className="underline font-medium hover:text-amber-900">Passenger Login</button>
-            </div>
-          </div>
 
           {error && (
             <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg px-4 py-3 mb-4 text-red-700 text-sm">

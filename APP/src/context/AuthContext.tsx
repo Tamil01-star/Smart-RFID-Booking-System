@@ -66,31 +66,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password: string) => {
     const users = getStoredUsers();
     
-    // Demo credentials
+    // Admin credentials are stored in environment variables — never hardcoded in source
+    const ADMIN_ACCOUNTS: Record<string, { password: string; userId: string; name: string }> = {};
+
+    // Legacy admin (optional env override)
+    const adminEmail = import.meta.env.VITE_ADMIN_EMAIL;
+    const adminPass  = import.meta.env.VITE_ADMIN_PASSWORD;
+    if (adminEmail && adminPass) {
+      ADMIN_ACCOUNTS[adminEmail.toLowerCase()] = { password: adminPass, userId: 'admin-001', name: 'Admin' };
+    }
+
+    // Vertex admin (optional env override)
+    const vertexId   = import.meta.env.VITE_VERTEX_ID;
+    const vertexPass = import.meta.env.VITE_VERTEX_PASSWORD;
+    if (vertexId && vertexPass) {
+      ADMIN_ACCOUNTS[vertexId.toLowerCase()] = { password: vertexPass, userId: 'admin-002', name: 'Vertex Admin' };
+    }
+
+    // Fallback: built-in demo passenger (NOT admin — no credentials shown on UI)
     const demoCredentials: Record<string, { password: string; userId: string; role: string }> = {
       'demo@smartbus.com': { password: 'demo123', userId: 'user-001', role: 'passenger' },
-      'admin@smartbus.com': { password: 'admin123', userId: 'admin-001', role: 'admin' },
-      'vertex': { password: 'vertex@01', userId: 'admin-002', role: 'admin' }, // specific vertex admin
       'priya@example.com': { password: 'demo123', userId: 'user-002', role: 'passenger' },
     };
 
-    const cred = demoCredentials[email.toLowerCase()];
-    if (cred && cred.password === password) {
-      let foundUser = users.find(u => u.id === cred.userId);
-      
-      // If vertex admin doesn't exist in local storage, inject it temporarily for demo mode
-      if (!foundUser && cred.userId === 'admin-002') {
+    // Check admin accounts first
+    const adminEntry = ADMIN_ACCOUNTS[email.toLowerCase()];
+    if (adminEntry && adminEntry.password === password) {
+      let foundUser = users.find(u => u.id === adminEntry.userId);
+      if (!foundUser) {
         foundUser = {
-          id: 'admin-002',
-          name: 'Vertex Admin',
-          email: 'vertex@admin.com',
+          id: adminEntry.userId,
+          name: adminEntry.name,
+          email: email.toLowerCase(),
           phone: '',
-          passengerId: 'SBA10002',
-          role: 'admin',
-          status: 'active',
+          passengerId: `SBA${adminEntry.userId}`,
+          role: 'admin' as const,
+          status: 'active' as const,
           createdAt: new Date().toISOString()
         };
       }
+      setUser(foundUser);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(foundUser));
+      return { success: true };
+    }
+
+    // Check registered users (passengers)
+    const cred = demoCredentials[email.toLowerCase()];
+    if (cred && cred.password === password) {
+      const foundUser = users.find(u => u.id === cred.userId);
       if (foundUser) {
         setUser(foundUser);
         localStorage.setItem(STORAGE_KEY, JSON.stringify(foundUser));
@@ -98,7 +121,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    // Check registered users
+    // Check registered users by email
     const foundUser = users.find(u => u.email.toLowerCase() === email.toLowerCase());
     if (foundUser) {
       // In demo mode, accept any password for registered users
