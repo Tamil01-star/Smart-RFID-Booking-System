@@ -47,7 +47,7 @@ export default function AdminLayout() {
         </Link>
         <div className="mt-3 flex items-center gap-2">
           <span className="status-dot status-dot-online" />
-          <span className="text-xs text-gray-500 font-medium">LIVE</span>
+          <span className="text-xs text-gray-500 font-medium">ACTIVE</span>
         </div>
       </div>
 

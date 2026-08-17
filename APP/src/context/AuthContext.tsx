@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User, UserRole } from '../types';
-import { DEMO_USERS } from '../data/mockData';
 
 interface AuthContextType {
   user: User | null;
@@ -33,7 +32,7 @@ function getStoredUsers(): User[] {
     const stored = localStorage.getItem(USERS_KEY);
     if (stored) return JSON.parse(stored);
   } catch {}
-  return [...DEMO_USERS];
+  return [];
 }
 
 function saveUsers(users: User[]) {
@@ -75,12 +74,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         { password: import.meta.env.VITE_VERTEX_PASSWORD || 'vertex@01', userId: 'admin-002', name: 'Vertex Admin' },
     };
 
-    // Demo passenger credentials (hardcoded, non-admin)
-    const demoCredentials: Record<string, { password: string; userId: string }> = {
-      'demo@smartbus.com': { password: 'demo123', userId: 'user-001' },
-      'priya@example.com': { password: 'demo123', userId: 'user-002' },
-    };
-
     // 1. Check admin accounts
     const adminEntry = ADMIN_ACCOUNTS[email.toLowerCase()];
     if (adminEntry && adminEntry.password === password) {
@@ -102,17 +95,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { success: true };
     }
 
-    // 2. Check built-in demo passengers
-    const cred = demoCredentials[email.toLowerCase()];
-    if (cred && cred.password === password) {
-      const foundUser = users.find(u => u.id === cred.userId);
-      if (foundUser) {
-        setUser(foundUser);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(foundUser));
-        return { success: true };
-      }
-    }
-
     // 3. Check registered passengers in local storage
     const foundUser = users.find(u => u.email.toLowerCase() === email.toLowerCase());
     if (foundUser) {
@@ -132,10 +114,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loginWithRFID = async (uid: string, password?: string) => {
     const rfidCards = JSON.parse(localStorage.getItem('smartbus_rfid_cards') || '[]');
-    // also add demo card support
-    if (uid === 'A1B2C3D4') {
-      rfidCards.push({ uid: 'A1B2C3D4', passengerId: 'SBP10001', status: 'active' });
-    }
     const card = rfidCards.find((c: any) => c.uid === uid && c.status === 'active');
     
     if (!card || !card.passengerId) {
@@ -151,10 +129,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.getItem('smartbus_passwords') || '{}'
       );
       
-      // Allow demo user bypass or strict checking for others
-      if (foundUser.email === 'demo@smartbus.com' && password === 'demo123') {
-        // success
-      } else if (storedPasswords[foundUser.id] !== password) {
+      if (storedPasswords[foundUser.id] !== password) {
         return { success: false, error: 'Incorrect password for this RFID card.' };
       }
 
