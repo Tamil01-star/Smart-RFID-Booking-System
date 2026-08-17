@@ -1,0 +1,119 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  passenger
+  admin
+  driver
+  conductor
+}
+
+enum Category {
+  general
+  student
+  senior_citizen
+  disabled_person
+  ex_serviceman
+}
+
+model User {
+  id           String    @id @default(uuid())
+  name         String
+  email        String    @unique
+  phone        String
+  passengerId  String    @unique
+  role         Role      @default(passenger)
+  category     Category? @default(general)
+  rfidUid      String?   @unique
+  password     String
+  status       String    @default("active")
+  createdAt    DateTime  @default(now())
+}
+
+model Bus {
+  id             String   @id @default(uuid())
+  busNumber      String   @unique
+  busName        String
+  source         String
+  destination    String
+  departureTime  String
+  arrivalTime    String
+  fare           Float
+  totalSeats     Int      @default(40)
+  availableSeats Int      @default(40)
+  status         String   @default("active")
+  route          String?
+  stopsWithFares Json?    // JSON array of stops and fares e.g. [{ "stopName": "Erode", "fare": 50 }]
+}
+
+model Booking {
+  id            String   @id @default(uuid())
+  bookingId     String   @unique
+  passengerId   String
+  passengerName String
+  busId         String
+  busNumber     String
+  source        String
+  destination   String
+  travelDate    String
+  departureTime String
+  arrivalTime   String
+  fare          Float
+  status        String   @default("confirmed")
+  rfidUid       String?
+  rfidLinked    Boolean  @default(false)
+  createdAt     DateTime @default(now())
+}
+
+model Wallet {
+  passengerId String   @id
+  balance     Float    @default(0.0)
+  currency    String   @default("INR")
+  updatedAt   DateTime @updatedAt
+}
+
+model WalletTransaction {
+  id            String   @id @default(uuid())
+  passengerId   String
+  type          String   // e.g. 'ADD_MONEY', 'FARE_DEDUCTION', 'REFUND'
+  amount        Float
+  description   String
+  balanceBefore Float
+  balanceAfter  Float
+  timestamp     DateTime @default(now())
+  status        String   @default("success")
+  busNumber     String?
+  rfidUid       String?
+}
+
+model RFIDCard {
+  uid           String    @id
+  passengerId   String
+  passengerName String
+  status        String    @default("active")
+  linkedAt      DateTime  @default(now())
+  lastUsedAt    DateTime?
+}
+
+model SystemLog {
+  id        String   @id @default(uuid())
+  level     String   // 'info' | 'warning' | 'error' | 'success'
+  message   String
+  source    String
+  timestamp DateTime @default(now())
+  details   String?
+}
+
+model OTP {
+  id        String   @id @default(uuid())
+  email     String
+  code      String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}

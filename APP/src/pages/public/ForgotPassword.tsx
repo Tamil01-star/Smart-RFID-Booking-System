@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Bus, Phone, KeyRound, Lock, CheckCircle, ArrowRight } from 'lucide-react';
+import { Bus, Mail, KeyRound, Lock, CheckCircle, ArrowRight } from 'lucide-react';
 import toast from 'react-hot-toast';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 export default function ForgotPassword() {
   const navigate = useNavigate();
   const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -14,12 +16,29 @@ export default function ForgotPassword() {
 
   const handleSendOTP = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!email) return;
     setLoading(true);
-    // TODO: Connect to Render backend here to send OTP
-    await new Promise(r => setTimeout(r, 1000)); // Simulate API call
-    setLoading(false);
-    toast.success('OTP sent successfully!');
-    setStep(2);
+
+    try {
+      const res = await fetch(`${API_URL}/auth/send-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      const data = await res.json();
+      setLoading(false);
+
+      if (!res.ok) {
+        toast.error(data.error || 'Failed to send OTP');
+        return;
+      }
+
+      toast.success('Verification OTP code sent to your email!');
+      setStep(2);
+    } catch (err: any) {
+      setLoading(false);
+      toast.error('Failed to connect to backend server');
+    }
   };
 
   const handleVerifyOTP = async (e: React.FormEvent) => {
@@ -29,11 +48,27 @@ export default function ForgotPassword() {
       return;
     }
     setLoading(true);
-    // TODO: Connect to Render backend here to verify OTP
-    await new Promise(r => setTimeout(r, 1000));
-    setLoading(false);
-    toast.success('OTP Verified');
-    setStep(3);
+
+    try {
+      const res = await fetch(`${API_URL}/auth/verify-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, otp })
+      });
+      const data = await res.json();
+      setLoading(false);
+
+      if (!res.ok) {
+        toast.error(data.error || 'Invalid OTP');
+        return;
+      }
+
+      toast.success('OTP Verified successfully');
+      setStep(3);
+    } catch (err) {
+      setLoading(false);
+      toast.error('Failed to connect to backend server');
+    }
   };
 
   const handleResetPassword = async (e: React.FormEvent) => {
@@ -43,23 +78,27 @@ export default function ForgotPassword() {
       return;
     }
     setLoading(true);
-    // TODO: Connect to Render backend here to save new password
-    await new Promise(r => setTimeout(r, 1000));
-    
-    // Fallback: update local storage for demo mode
-    try {
-      const users = JSON.parse(localStorage.getItem('smartbus_users') || '[]');
-      const user = users.find((u: any) => u.phone === phone);
-      if (user) {
-        const passwords = JSON.parse(localStorage.getItem('smartbus_passwords') || '{}');
-        passwords[user.id] = newPassword;
-        localStorage.setItem('smartbus_passwords', JSON.stringify(passwords));
-      }
-    } catch {}
 
-    setLoading(false);
-    toast.success('Password reset successful!');
-    navigate('/login');
+    try {
+      const res = await fetch(`${API_URL}/auth/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password: newPassword })
+      });
+      const data = await res.json();
+      setLoading(false);
+
+      if (!res.ok) {
+        toast.error(data.error || 'Failed to reset password');
+        return;
+      }
+
+      toast.success('Password updated successfully!');
+      navigate('/login');
+    } catch (err) {
+      setLoading(false);
+      toast.error('Failed to connect to backend server');
+    }
   };
 
   return (
@@ -89,23 +128,22 @@ export default function ForgotPassword() {
           {step === 1 && (
             <div className="animate-fade-in">
               <div className="w-12 h-12 bg-primary-50 rounded-xl flex items-center justify-center mb-4">
-                <Phone className="w-6 h-6 text-primary-700" />
+                <Mail className="w-6 h-6 text-primary-700" />
               </div>
               <h2 className="text-2xl font-bold text-gray-900 mb-1">Forgot Password?</h2>
-              <p className="text-sm text-gray-500 mb-6">Enter your phone number to receive a 6-digit OTP verification code.</p>
+              <p className="text-sm text-gray-500 mb-6">Enter your registered email address to receive a 6-digit OTP verification code.</p>
               
               <form onSubmit={handleSendOTP} className="space-y-4">
                 <div>
-                  <label htmlFor="phone" className="input-label">Phone Number</label>
+                  <label htmlFor="email" className="input-label">Email Address</label>
                   <input
-                    id="phone"
-                    type="tel"
-                    value={phone}
-                    onChange={e => setPhone(e.target.value)}
-                    className="input font-mono"
-                    placeholder="9876543210"
+                    id="email"
+                    type="email"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    className="input"
+                    placeholder="you@example.com"
                     required
-                    maxLength={10}
                   />
                 </div>
                 <button type="submit" disabled={loading} className="btn-primary w-full justify-center py-3">
@@ -121,11 +159,7 @@ export default function ForgotPassword() {
                 <KeyRound className="w-6 h-6 text-blue-700" />
               </div>
               <h2 className="text-2xl font-bold text-gray-900 mb-1">Verify OTP</h2>
-              <p className="text-sm text-gray-500 mb-6">Enter the 6-digit code sent to <strong className="text-gray-700 font-mono">{phone}</strong></p>
-              
-              <div className="demo-banner mb-6">
-                <span className="text-xs">OTP generation API is pending Render deployment. You can enter any 6 digits for now to test the flow.</span>
-              </div>
+              <p className="text-sm text-gray-500 mb-6">Enter the 6-digit code sent to <strong className="text-gray-700">{email}</strong></p>
 
               <form onSubmit={handleVerifyOTP} className="space-y-4">
                 <div>
@@ -145,7 +179,7 @@ export default function ForgotPassword() {
                   {loading ? 'Verifying...' : 'Verify OTP'}
                 </button>
                 <button type="button" onClick={() => setStep(1)} className="w-full text-center text-sm text-gray-500 hover:text-gray-700 mt-2">
-                  Change phone number
+                  Change email address
                 </button>
               </form>
             </div>
