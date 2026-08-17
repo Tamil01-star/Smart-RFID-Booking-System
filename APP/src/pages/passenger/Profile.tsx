@@ -85,7 +85,6 @@ export default function Profile() {
               Email Address
             </label>
             <div className="input bg-gray-50 text-gray-500 cursor-not-allowed">{user?.email}</div>
-            <p className="text-xs text-gray-400 mt-1">Email cannot be changed in demo mode</p>
           </div>
 
           <div>

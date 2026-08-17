@@ -78,7 +78,7 @@ export default function Home() {
           <div className="max-w-3xl">
             <div className="inline-flex items-center gap-2 bg-white/10 backdrop-blur rounded-full px-4 py-1.5 text-sm text-blue-100 mb-6">
               <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-              Demo Mode Active — No Hardware Required
+              AI-Enabled RFID Smart Bus System — Live System
             </div>
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold leading-tight text-balance">
               Travel Smarter.<br />
@@ -239,7 +239,7 @@ export default function Home() {
       <section className="bg-primary-900 text-white py-16">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <h2 className="text-3xl font-bold mb-4">Ready to Try SMARTBUS+?</h2>
-          <p className="text-blue-200 mb-8 max-w-xl mx-auto">Create your account and explore the complete demo. No hardware required — everything works in demo mode.</p>
+          <p className="text-blue-200 mb-8 max-w-xl mx-auto">Create your account and start using SMARTBUS+. Register as a passenger or contact an admin to get your RFID card linked.</p>
           <div className="flex flex-wrap justify-center gap-4">
             <Link to="/register" className="btn bg-white text-primary-900 hover:bg-blue-50 btn-lg font-semibold">
               Create Passenger Account
@@ -262,7 +262,7 @@ export default function Home() {
               <span className="text-white font-bold">SMARTBUS+</span>
             </div>
             <p className="text-sm text-center">
-              AI-Enabled RFID Smart Bus System — ECE IoT Project | Demo Mode Only
+              AI-Enabled RFID Smart Bus System — ECE IoT Project
             </p>
             <div className="flex gap-4 text-sm">
               <Link to="/login" className="hover:text-white transition-colors">Login</Link>

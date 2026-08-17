@@ -72,15 +72,9 @@ export default function Wallet() {
             <div className="text-blue-200 text-xs mt-2">INR • {user?.passengerId}</div>
           </div>
           <div className="bg-white/10 rounded-xl px-3 py-1.5 text-xs font-bold text-blue-100">
-            DEMO MODE
+            SMARTBUS+ WALLET
           </div>
         </div>
-      </div>
-
-      {/* Demo Notice */}
-      <div className="demo-banner">
-        <AlertCircle className="w-4 h-4 flex-shrink-0" />
-        <span>This is a <strong>demo wallet</strong>. No real money is involved. Use preset amounts or enter a custom amount to add virtual funds for testing.</span>
       </div>
 
       {/* Add Money */}

@@ -41,10 +41,8 @@ export default function PassengerLayout() {
           <span className="font-black text-primary-900">SMARTBUS<span className="text-blue-500">+</span></span>
         </Link>
         <div className="mt-3 flex items-center gap-2">
-          <span className={`status-dot ${settings.systemMode === 'demo' ? 'status-dot-demo' : 'status-dot-online'}`} />
-          <span className="text-xs text-gray-500 font-medium">
-            {settings.systemMode === 'demo' ? 'DEMO MODE' : 'HARDWARE MODE'}
-          </span>
+          <span className="status-dot status-dot-online" />
+          <span className="text-xs text-gray-500 font-medium">LIVE</span>
         </div>
       </div>
 
@@ -130,14 +128,6 @@ export default function PassengerLayout() {
             {user?.name.charAt(0).toUpperCase()}
           </div>
         </header>
-
-        {/* Demo mode banner */}
-        {settings.systemMode === 'demo' && (
-          <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-xs text-amber-700 flex items-center gap-2">
-            <Zap className="w-3.5 h-3.5 flex-shrink-0" />
-            <strong>DEMO MODE</strong> — All data is stored locally. Firebase & ESP32 not connected.
-          </div>
-        )}
 
         <main className="p-4 sm:p-6 lg:p-8 animate-fade-in">
           <Outlet />
