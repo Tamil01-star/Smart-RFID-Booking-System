@@ -78,7 +78,7 @@ export default function Home() {
           <div className="max-w-3xl">
             <div className="inline-flex items-center gap-2 bg-white/10 backdrop-blur rounded-full px-4 py-1.5 text-sm text-blue-100 mb-6">
               <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-              AI-Enabled RFID Smart Bus System — Live System
+              AI-Enabled RFID Smart Bus System — Active System
             </div>
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold leading-tight text-balance">
               Travel Smarter.<br />
