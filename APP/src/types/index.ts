@@ -1,5 +1,6 @@
 // ==================== USER TYPES ====================
-export type UserRole = 'passenger' | 'admin';
+export type UserRole = 'passenger' | 'admin' | 'driver' | 'conductor';
+export type PassengerCategory = 'general' | 'student' | 'senior_citizen' | 'disabled_person' | 'ex_serviceman';
 
 export interface User {
   id: string;
@@ -8,8 +9,9 @@ export interface User {
   phone: string;
   passengerId: string;
   role: UserRole;
+  category?: PassengerCategory;
   rfidUid?: string;
-  status: 'active' | 'inactive';
+  status: 'active' | 'inactive' | 'suspended';
   createdAt: string;
 }
 

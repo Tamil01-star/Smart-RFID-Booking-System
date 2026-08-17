@@ -3,7 +3,6 @@
 #include <SPI.h>
 #include <MFRC522.h>
 #include <Keypad.h>
-
 // ==========================================
 // PIN DEFINITIONS
 // ==========================================
@@ -12,7 +11,6 @@
 #define GREEN_LED 4
 #define RED_LED   2
 #define BUZZER    15
-
 // Keypad Configuration
 const byte ROWS = 4; 
 const byte COLS = 4; 
@@ -24,14 +22,12 @@ char keys[ROWS][COLS] = {
 };
 byte rowPins[ROWS] = {13, 12, 14, 27};
 byte colPins[COLS] = {26, 25, 33, 32};
-
 // ==========================================
 // OBJECT INITIALIZATION
 // ==========================================
 LiquidCrystal_I2C lcd(0x27, 16, 2); 
 MFRC522 rfid(SS_PIN, RST_PIN);
 Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
-
 // ==========================================
 // STATE MACHINE CONFIGURATION
 // ==========================================
@@ -51,27 +47,21 @@ enum SystemState {
   STATE_CANCELLED,
   STATE_TIMEOUT
 };
-
 SystemState currentState = STATE_STANDBY;
 bool stateJustChanged = true;
 unsigned long stateStartTime = 0;
 bool demoPreBookedToggle = false; // Toggles every scan for easy testing
-
 // Walk-in Booking Variables
 int currentDestIndex = 0; 
 const int NUM_DESTINATIONS = 4;
 String destinations[NUM_DESTINATIONS] = {"1.Tiruchengode", "2.Erode", "3.Tiruppur", "4.Coimbatore"};
 String shortNames[NUM_DESTINATIONS] = {"Tiruchengode", "Erode", "Tiruppur", "Coimbatore"};
 int fares[NUM_DESTINATIONS] = {15, 30, 42, 57}; // Demo: Student 50% fares from PDF
-
 int simulatedWalletBalance = 150; // Try changing to 20 to test Low Balance path
-
 #include <WiFi.h>
-
 // WiFi Credentials
 const char* ssid = "ZENKAI_MONARCH";
 const char* password = "********";
-
 // ==========================================
 // SETUP & INITIALIZATION
 // ==========================================
@@ -126,7 +116,6 @@ void setup() {
   delay(1000);
   changeState(STATE_STANDBY);
 }
-
 // ==========================================
 // MAIN LOOP
 // ==========================================
@@ -138,10 +127,8 @@ void loop() {
     Serial.print("Keypad Pressed: ");
     Serial.println(key);
   }
-
   unsigned long currentTime = millis();
   unsigned long elapsedTime = currentTime - stateStartTime;
-
   switch(currentState) {
     // ----------------------------------------------------
     case STATE_STANDBY:
@@ -176,7 +163,6 @@ void loop() {
         }
       }
       break;
-
     // ----------------------------------------------------
     case STATE_RFID_SCANNED_NO_BOOKING:
       if (stateJustChanged) {
@@ -203,7 +189,6 @@ void loop() {
         changeState(STATE_WALKIN_PROMPT);
       }
       break;
-
     // ----------------------------------------------------
     case STATE_RFID_SCANNED_BOOKED:
       if (stateJustChanged) {
@@ -229,7 +214,6 @@ void loop() {
         changeState(STATE_STANDBY); // Passenger boards, reset system
       }
       break;
-
     // ----------------------------------------------------
     case STATE_WALKIN_PROMPT:
       if (stateJustChanged) {
@@ -244,7 +228,6 @@ void loop() {
       else if (key == 'C') changeState(STATE_CANCELLED);
       else if (elapsedTime >= 10000) changeState(STATE_TIMEOUT);
       break;
-
     // ----------------------------------------------------
     case STATE_BOARDING_LOC:
       if (stateJustChanged) {
@@ -258,7 +241,6 @@ void loop() {
       }
       if (elapsedTime >= 2500) changeState(STATE_DEST_MENU);
       break;
-
     // ----------------------------------------------------
     case STATE_DEST_MENU:
       if (stateJustChanged) {
@@ -291,7 +273,6 @@ void loop() {
       }
       if (elapsedTime >= 30000) changeState(STATE_TIMEOUT);
       break;
-
     // ----------------------------------------------------
     case STATE_SELECTED_CONFIRM:
       if (stateJustChanged) {
@@ -306,7 +287,6 @@ void loop() {
       }
       if (elapsedTime >= 1500) changeState(STATE_FARE_DISPLAY);
       break;
-
     // ----------------------------------------------------
     case STATE_FARE_DISPLAY:
       if (stateJustChanged) {
@@ -321,7 +301,6 @@ void loop() {
       else if (key == 'C') changeState(STATE_CANCELLED);
       else if (elapsedTime >= 20000) changeState(STATE_TIMEOUT);
       break;
-
     // ----------------------------------------------------
     case STATE_CHECKING_WALLET:
       if (stateJustChanged) {
@@ -340,7 +319,6 @@ void loop() {
         }
       }
       break;
-
     // ----------------------------------------------------
     case STATE_ALLOCATING_SEAT:
       if (stateJustChanged) {
@@ -353,7 +331,6 @@ void loop() {
       }
       if (elapsedTime >= 500) changeState(STATE_SUCCESS);
       break;
-
     // ----------------------------------------------------
     case STATE_SUCCESS:
       if (stateJustChanged) {
@@ -377,7 +354,6 @@ void loop() {
         changeState(STATE_STANDBY);
       }
       break;
-
     // ----------------------------------------------------
     case STATE_LOW_BALANCE:
       if (stateJustChanged) {
@@ -411,7 +387,6 @@ void loop() {
         changeState(STATE_STANDBY);
       }
       break;
-
     // ----------------------------------------------------
     case STATE_CANCELLED:
       if (stateJustChanged) {
@@ -424,7 +399,6 @@ void loop() {
       }
       if (elapsedTime >= 2000) changeState(STATE_STANDBY);
       break;
-
     // ----------------------------------------------------
     case STATE_TIMEOUT:
       if (stateJustChanged) {
@@ -439,7 +413,6 @@ void loop() {
       break;
   }
 }
-
 // Helper to transition state cleanly
 void changeState(SystemState newState) {
   currentState = newState;

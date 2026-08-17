@@ -36,9 +36,10 @@ export default function Login() {
     }
   };
 
-  const fillDemo = (type: 'passenger' | 'admin') => {
+  const fillDemo = (type: 'passenger' | 'admin' | 'vertex') => {
     if (type === 'passenger') { setEmail('demo@smartbus.com'); setPassword('demo123'); }
-    else { setEmail('admin@smartbus.com'); setPassword('admin123'); }
+    else if (type === 'admin') { setEmail('admin@smartbus.com'); setPassword('admin123'); }
+    else { setEmail('vertex'); setPassword('vertex@01'); }
     setError('');
   };
 
@@ -69,7 +70,9 @@ export default function Login() {
               <span className="font-semibold">Demo Mode:</span>{' '}
               <button onClick={() => fillDemo('passenger')} className="underline font-medium hover:text-amber-900">Passenger</button>
               {' or '}
-              <button onClick={() => fillDemo('admin')} className="underline font-medium hover:text-amber-900">Admin</button>
+              <button type="button" onClick={() => fillDemo('admin')} className="underline font-medium hover:text-amber-900">Admin</button>
+              {' | '}
+              <button type="button" onClick={() => fillDemo('vertex')} className="underline font-medium hover:text-amber-900">Vertex Admin</button>
             </div>
           </div>
 

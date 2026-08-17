@@ -9,6 +9,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   loginWithRFID: (uid: string) => Promise<{ success: boolean; error?: string }>;
   register: (data: RegisterData) => Promise<{ success: boolean; error?: string }>;
+  adminCreatePassenger: (data: any) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   updateUser: (updates: Partial<User>) => void;
 }
@@ -65,15 +66,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const users = getStoredUsers();
     
     // Demo credentials
-    const demoCredentials: Record<string, { password: string; userId: string }> = {
-      'demo@smartbus.com': { password: 'demo123', userId: 'user-001' },
-      'admin@smartbus.com': { password: 'admin123', userId: 'admin-001' },
-      'priya@example.com': { password: 'demo123', userId: 'user-002' },
+    const demoCredentials: Record<string, { password: string; userId: string; role: string }> = {
+      'demo@smartbus.com': { password: 'demo123', userId: 'user-001', role: 'passenger' },
+      'admin@smartbus.com': { password: 'admin123', userId: 'admin-001', role: 'admin' },
+      'vertex': { password: 'vertex@01', userId: 'admin-002', role: 'admin' }, // specific vertex admin
+      'priya@example.com': { password: 'demo123', userId: 'user-002', role: 'passenger' },
     };
 
     const cred = demoCredentials[email.toLowerCase()];
     if (cred && cred.password === password) {
-      const foundUser = users.find(u => u.id === cred.userId);
+      let foundUser = users.find(u => u.id === cred.userId);
+      
+      // If vertex admin doesn't exist in local storage, inject it temporarily for demo mode
+      if (!foundUser && cred.userId === 'admin-002') {
+        foundUser = {
+          id: 'admin-002',
+          name: 'Vertex Admin',
+          email: 'vertex@admin.com',
+          phone: '',
+          passengerId: 'SBA10002',
+          role: 'admin',
+          status: 'active',
+          createdAt: new Date().toISOString()
+        };
+      }
       if (foundUser) {
         setUser(foundUser);
         localStorage.setItem(STORAGE_KEY, JSON.stringify(foundUser));
@@ -180,9 +196,64 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const adminCreatePassenger = async (data: any) => {
+    const users = getStoredUsers();
+    
+    if (users.find(u => u.email.toLowerCase() === data.email.toLowerCase())) {
+      return { success: false, error: 'An account with this email already exists.' };
+    }
+
+    const passengerId = generatePassengerId(users);
+    const newUser: User = {
+      id: `user-${Date.now()}`,
+      name: data.name,
+      email: data.email,
+      phone: data.phone,
+      passengerId,
+      role: 'passenger',
+      category: data.category,
+      status: 'active',
+      createdAt: new Date().toISOString(),
+    };
+
+    const updatedUsers = [...users, newUser];
+    saveUsers(updatedUsers);
+
+    // Save default password
+    const passwords = JSON.parse(localStorage.getItem('smartbus_passwords') || '{}');
+    passwords[newUser.id] = 'smartbus123'; // Default password for admin-created users
+    localStorage.setItem('smartbus_passwords', JSON.stringify(passwords));
+
+    // Initialize wallet
+    const wallets = JSON.parse(localStorage.getItem('smartbus_wallets') || '{}');
+    wallets[newUser.passengerId] = { balance: 0, currency: 'INR', updatedAt: new Date().toISOString() };
+    localStorage.setItem('smartbus_wallets', JSON.stringify(wallets));
+
+    // Link RFID if provided
+    if (data.rfidUid) {
+      const rfidCards = JSON.parse(localStorage.getItem('smartbus_rfid_cards') || '[]');
+      
+      // Check if UID already in use
+      if (rfidCards.find((c: any) => c.uid === data.rfidUid && c.status === 'active')) {
+        return { success: false, error: 'This RFID card is already linked to another passenger.' };
+      }
+      
+      rfidCards.push({
+        uid: data.rfidUid,
+        passengerId,
+        status: 'active',
+        linkedAt: new Date().toISOString(),
+        lastUsedAt: null
+      });
+      localStorage.setItem('smartbus_rfid_cards', JSON.stringify(rfidCards));
+    }
+
+    return { success: true };
+  };
+
   return (
     <AuthContext.Provider value={{
-      user, isAuthenticated: !!user, isLoading, login, loginWithRFID, register, logout, updateUser
+      user, isAuthenticated: !!user, isLoading, login, loginWithRFID, register, adminCreatePassenger, logout, updateUser
     }}>
       {children}
     </AuthContext.Provider>
