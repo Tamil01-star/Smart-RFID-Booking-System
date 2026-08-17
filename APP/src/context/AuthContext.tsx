@@ -66,30 +66,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password: string) => {
     const users = getStoredUsers();
     
-    // Admin credentials are stored in environment variables — never hardcoded in source
-    const ADMIN_ACCOUNTS: Record<string, { password: string; userId: string; name: string }> = {};
-
-    // Legacy admin (optional env override)
-    const adminEmail = import.meta.env.VITE_ADMIN_EMAIL;
-    const adminPass  = import.meta.env.VITE_ADMIN_PASSWORD;
-    if (adminEmail && adminPass) {
-      ADMIN_ACCOUNTS[adminEmail.toLowerCase()] = { password: adminPass, userId: 'admin-001', name: 'Admin' };
-    }
-
-    // Vertex admin (optional env override)
-    const vertexId   = import.meta.env.VITE_VERTEX_ID;
-    const vertexPass = import.meta.env.VITE_VERTEX_PASSWORD;
-    if (vertexId && vertexPass) {
-      ADMIN_ACCOUNTS[vertexId.toLowerCase()] = { password: vertexPass, userId: 'admin-002', name: 'Vertex Admin' };
-    }
-
-    // Fallback: built-in demo passenger (NOT admin — no credentials shown on UI)
-    const demoCredentials: Record<string, { password: string; userId: string; role: string }> = {
-      'demo@smartbus.com': { password: 'demo123', userId: 'user-001', role: 'passenger' },
-      'priya@example.com': { password: 'demo123', userId: 'user-002', role: 'passenger' },
+    // Admin accounts: read from env vars first, then fall back to defaults
+    const ADMIN_ACCOUNTS: Record<string, { password: string; userId: string; name: string }> = {
+      // Default admin accounts (always available)
+      [import.meta.env.VITE_ADMIN_EMAIL?.toLowerCase() || 'admin@smartbus.com']:
+        { password: import.meta.env.VITE_ADMIN_PASSWORD || 'admin123', userId: 'admin-001', name: 'Admin' },
+      [import.meta.env.VITE_VERTEX_ID?.toLowerCase() || 'vertex']:
+        { password: import.meta.env.VITE_VERTEX_PASSWORD || 'vertex@01', userId: 'admin-002', name: 'Vertex Admin' },
     };
 
-    // Check admin accounts first
+    // Demo passenger credentials (hardcoded, non-admin)
+    const demoCredentials: Record<string, { password: string; userId: string }> = {
+      'demo@smartbus.com': { password: 'demo123', userId: 'user-001' },
+      'priya@example.com': { password: 'demo123', userId: 'user-002' },
+    };
+
+    // 1. Check admin accounts
     const adminEntry = ADMIN_ACCOUNTS[email.toLowerCase()];
     if (adminEntry && adminEntry.password === password) {
       let foundUser = users.find(u => u.id === adminEntry.userId);
@@ -110,7 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { success: true };
     }
 
-    // Check registered users (passengers)
+    // 2. Check built-in demo passengers
     const cred = demoCredentials[email.toLowerCase()];
     if (cred && cred.password === password) {
       const foundUser = users.find(u => u.id === cred.userId);
@@ -121,10 +113,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    // Check registered users by email
+    // 3. Check registered passengers in local storage
     const foundUser = users.find(u => u.email.toLowerCase() === email.toLowerCase());
     if (foundUser) {
-      // In demo mode, accept any password for registered users
       const storedPasswords: Record<string, string> = JSON.parse(
         localStorage.getItem('smartbus_passwords') || '{}'
       );
@@ -133,10 +124,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(foundUser));
         return { success: true };
       }
-      return { success: false, error: 'Invalid password' };
+      return { success: false, error: 'Invalid password. Try your phone number as password.' };
     }
 
-    return { success: false, error: 'No account found with this email. Please register first.' };
+    return { success: false, error: 'No account found. Please register or contact admin.' };
   };
 
   const loginWithRFID = async (uid: string, password?: string) => {
