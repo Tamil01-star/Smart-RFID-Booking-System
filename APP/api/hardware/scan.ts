@@ -14,30 +14,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     // Lookup bus_id from bus_number
-    const busRes = await query(`SELECT id FROM buses WHERE bus_number = $1`, [bus_number]);
+    const busRes = await query(`SELECT id FROM "Bus" WHERE "busNumber" = $1`, [bus_number]);
     if (busRes.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Bus not found in database' });
     }
     const bus_id = busRes.rows[0].id;
+    
     // 1. Check if RFID exists and is linked
-    const cardRes = await query(`SELECT passenger_id, status FROM rfid_cards WHERE uid = $1`, [uid]);
+    const cardRes = await query(`SELECT "passengerId", status FROM "RFIDCard" WHERE uid = $1`, [uid]);
     if (cardRes.rows.length === 0) {
       return res.status(401).json({ success: false, message: 'Card not registered' });
     }
     
     const card = cardRes.rows[0];
-    if (card.status !== 'active' || !card.passenger_id) {
+    if (card.status !== 'active' || !card.passengerId) {
       return res.status(403).json({ success: false, message: 'Card not active or unlinked' });
     }
 
-    const passengerId = card.passenger_id;
+    const passengerId = card.passengerId;
 
     // 2. Check for an existing valid booking for this passenger, on this bus, for today
-    // We assume travel_date is stored without time, so CURRENT_DATE works for exact matches.
     const bookingRes = await query(`
-      SELECT id, booking_id, seat_number, status 
-      FROM bookings 
-      WHERE passenger_id = $1 AND bus_id = $2 AND travel_date = CURRENT_DATE
+      SELECT id, "bookingId", "seatNumber", status 
+      FROM "Booking" 
+      WHERE "passengerId" = $1 AND "busId" = $2 AND "travelDate" >= CURRENT_DATE
       ORDER BY id DESC LIMIT 1
     `, [passengerId, bus_id]);
 
@@ -58,18 +58,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // 4. Update status to boarded
-    await query(`UPDATE bookings SET status = 'boarded' WHERE id = $1`, [booking.id]);
+    await query(`UPDATE "Booking" SET status = 'boarded' WHERE id = $1`, [booking.id]);
 
     // 5. Update RFID last used
-    await query(`UPDATE rfid_cards SET last_used_at = CURRENT_TIMESTAMP WHERE uid = $1`, [uid]);
+    await query(`UPDATE "RFIDCard" SET "lastUsedAt" = CURRENT_TIMESTAMP WHERE uid = $1`, [uid]);
 
     // 6. Return success with seat number
     return res.status(200).json({ 
       success: true, 
       message: 'Boarding Successful', 
       passengerId,
-      bookingId: booking.booking_id,
-      seatNumber: booking.seat_number || 'TBD'
+      bookingId: booking.bookingId,
+      seatNumber: booking.seatNumber || 'TBD'
     });
 
   } catch (error: any) {
