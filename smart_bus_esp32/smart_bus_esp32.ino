@@ -12,8 +12,9 @@
 // ==========================================
 const char* ssid = "ZENKAI_MONARCH";
 const char* password = "********";
-const char* apiEndpoint = "https://backend-sigma-beige-36.vercel.app/api/esp32/scan";
-const char* HARDCODED_BUS_NUMBER = "SB-101";
+const char* apiEndpoint = "https://smart-rfid-booking-system-tawny.vercel.app/api/hardware/scan";
+const char* bookEndpoint = "https://smart-rfid-booking-system-tawny.vercel.app/api/hardware/book";
+const char* HARDCODED_BUS_NUMBER = "NS893";
 
 // ==========================================
 // HARDWARE PIN CONFIGURATION
@@ -196,6 +197,36 @@ int checkBooking(String uid, String &outSeat) {
   }
   http.end();
   return httpResponseCode;
+}
+
+int processPayment(String uid, int fareAmount, String &outSeat, int &outBalance) {
+  if (WiFi.status() != WL_CONNECTED) return -1;
+  HTTPClient http;
+  http.begin(secureClient, bookEndpoint);
+  http.addHeader("Content-Type", "application/json");
+  
+  String httpRequestData = "{\"uid\":\"" + uid + "\",\"bus_number\":\"" + String(HARDCODED_BUS_NUMBER) + "\",\"fare\":" + String(fareAmount) + "}";
+  int responseCode = http.POST(httpRequestData);
+  
+  if (responseCode == 200) {
+     String payload = http.getString();
+     int seatIdx = payload.indexOf("\"seatNumber\":\"");
+     if (seatIdx != -1) {
+        seatIdx += 14;
+        int endQuote = payload.indexOf("\"", seatIdx);
+        outSeat = payload.substring(seatIdx, endQuote);
+     } else {
+        outSeat = "TBD";
+     }
+     int balIdx = payload.indexOf("\"newBalance\":");
+     if (balIdx != -1) {
+        balIdx += 13;
+        int endBracket = payload.indexOf("}", balIdx);
+        outBalance = payload.substring(balIdx, endBracket).toInt();
+     }
+  }
+  http.end();
+  return responseCode;
 }
 
 int calculateFare(int startIdx, int endIdx, BusType type) {
@@ -563,19 +594,38 @@ void loop() {
     // ----------------------------------------------------
     case STATE_CHECKING_WALLET:
       if (stateJustChanged) {
-        showLCD("Checking Wallet.", "Please wait...");
-        stateJustChanged = false;
-      }
-      if (elapsedTime >= 800) {
         int singleFare = calculateFare(currentBoardingIndex, currentDestIndex, currentBusType);
         int totalFare = singleFare * ticketCount;
-        
-        if (simulatedWalletBalance >= totalFare) {
-          changeState(STATE_ALLOCATING_SEAT);
-        } else {
-          changeState(STATE_LOW_BALANCE);
-        }
+        showLCD("Rs." + String(totalFare) + " Due", "Tap Card to Pay");
+        stateJustChanged = false;
       }
+      
+      if (readRFID(lastScannedUID)) {
+         buzzerCardRead();
+         showLCD("Processing...", "Please Wait");
+         
+         int singleFare = calculateFare(currentBoardingIndex, currentDestIndex, currentBusType);
+         int totalFare = singleFare * ticketCount;
+         
+         int responseCode = processPayment(lastScannedUID, totalFare, assignedSeat, simulatedWalletBalance);
+         
+         if (responseCode == 200) {
+            changeState(STATE_SUCCESS);
+         } else if (responseCode == 402) {
+            changeState(STATE_LOW_BALANCE);
+         } else if (responseCode == 401) {
+            changeState(STATE_RFID_INVALID);
+         } else {
+            showLCD("Payment Error", "Try Again");
+            redLED(true);
+            buzzerInvalid();
+            delay(2000);
+            redLED(false);
+            changeState(STATE_STANDBY);
+         }
+      }
+      if (key == 'C') changeState(STATE_CANCELLED);
+      if (elapsedTime >= 20000) changeState(STATE_TIMEOUT);
       break;
 
     // ----------------------------------------------------
@@ -590,13 +640,9 @@ void loop() {
     // ----------------------------------------------------
     case STATE_SUCCESS:
       if (stateJustChanged) {
-        String r1 = (ticketCount > 1) ? (String(ticketCount) + " Seats Booked!") : "Boarded! Seat22B";
+        String r1 = (ticketCount > 1) ? (String(ticketCount) + " Seats Booked!") : ("Boarded! " + assignedSeat);
         
-        int singleFare = calculateFare(currentBoardingIndex, currentDestIndex, currentBusType);
-        int totalFare = singleFare * ticketCount;
-        int remaining = simulatedWalletBalance - totalFare;
-        
-        showLCD(r1, "Bal: Rs." + String(remaining));
+        showLCD(r1, "Bal: Rs." + String(simulatedWalletBalance));
         greenLED(true);
         buzzerValid();
         stateJustChanged = false;
@@ -610,19 +656,13 @@ void loop() {
     // ----------------------------------------------------
     case STATE_LOW_BALANCE:
       if (stateJustChanged) {
-        int singleFare = calculateFare(currentBoardingIndex, currentDestIndex, currentBusType);
-        int totalFare = singleFare * ticketCount;
-        int shortfall = totalFare - simulatedWalletBalance;
-        
-        showLCD("Low Balance!", "Need Rs." + String(shortfall) + " more");
+        showLCD("Not a valid", "balance!");
         redLED(true);
-        buzzerInvalid();
+        buzzerInvalidLong(); // 2 sec long red signal
         stateJustChanged = false;
       }
-      if (elapsedTime >= 4000) {
+      if (elapsedTime >= 2000) {
         redLED(false);
-        showLCD("Add money via App", "or Counter Recharge");
-        delay(3000); 
         changeState(STATE_STANDBY);
       }
       break;
