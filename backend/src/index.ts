@@ -862,6 +862,10 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date() });
 });
 
+app.get('/', (req, res) => {
+  res.json({ status: 'ok', message: 'SMARTBUS+ Backend Service is running.', time: new Date() });
+});
+
 // Start Server
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
