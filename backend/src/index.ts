@@ -867,6 +867,139 @@ app.get('/', (req, res) => {
 });
 
 // Start Server
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`🚀 Server running on port ${PORT}`);
+  
+  // Auto-seed buses if empty
+  try {
+    const busCount = await prisma.bus.count();
+    if (busCount === 0) {
+      console.log('🌱 Database is empty. Running auto-seed...');
+      const adminPasswordHash = await bcrypt.hash('admin123', 10);
+      const vertexPasswordHash = await bcrypt.hash('vertex@01', 10);
+      const passengerPasswordHash = await bcrypt.hash('passenger123', 10);
+
+      // Create default users
+      await prisma.user.create({
+        data: {
+          name: 'System Admin',
+          email: 'admin@smartbus.com',
+          phone: '9876543210',
+          passengerId: 'ADMIN001',
+          role: 'admin',
+          password: adminPasswordHash,
+          status: 'active',
+        },
+      });
+
+      await prisma.user.create({
+        data: {
+          name: 'Vertex Operator',
+          email: 'vertex@smartbus.com',
+          phone: '9876543211',
+          passengerId: 'VERTEX001',
+          role: 'admin',
+          password: vertexPasswordHash,
+          status: 'active',
+        },
+      });
+
+      await prisma.user.create({
+        data: {
+          name: 'Tamil Kumar',
+          email: 'passenger@smartbus.com',
+          phone: '9876543212',
+          passengerId: 'PASS001',
+          role: 'passenger',
+          password: passengerPasswordHash,
+          status: 'active',
+          rfidUid: 'CA53F754',
+        },
+      });
+
+      await prisma.wallet.create({
+        data: {
+          passengerId: 'PASS001',
+          balance: 1500.0,
+          currency: 'INR',
+        },
+      });
+
+      await prisma.rFIDCard.create({
+        data: {
+          uid: 'CA53F754',
+          passengerId: 'PASS001',
+          passengerName: 'Tamil Kumar',
+          status: 'active',
+        },
+      });
+
+      const stops = [
+        { stopName: 'Salem', distance: 0, order: 1 },
+        { stopName: 'Namakkal', distance: 52, order: 2 },
+        { stopName: 'Karur', distance: 97, order: 3 },
+        { stopName: 'Dindigul', distance: 202, order: 4 },
+        { stopName: 'Madurai', distance: 267, order: 5 },
+        { stopName: 'Virudhunagar', distance: 315, order: 6 },
+        { stopName: 'Tirunelveli', distance: 440, order: 7 },
+        { stopName: 'Nagercoil', distance: 523, order: 8 },
+        { stopName: 'Thiruvananthapuram', distance: 593, order: 9 }
+      ];
+
+      await prisma.bus.create({
+        data: {
+          busNumber: 'SB-101',
+          busName: 'Salem-TVM Ordinary Express',
+          source: 'Salem',
+          destination: 'Thiruvananthapuram',
+          departureTime: '06:00',
+          arrivalTime: '19:00',
+          fare: 1185,
+          totalSeats: 52,
+          availableSeats: 52,
+          status: 'active',
+          route: 'Salem - Namakkal - Karur - Dindigul - Madurai - Virudhunagar - Tirunelveli - Nagercoil - Thiruvananthapuram',
+          stopsWithFares: stops,
+        },
+      });
+
+      await prisma.bus.create({
+        data: {
+          busNumber: 'SB-202',
+          busName: 'Salem-TVM Superfast Express',
+          source: 'Salem',
+          destination: 'Thiruvananthapuram',
+          departureTime: '07:30',
+          arrivalTime: '19:30',
+          fare: 1630,
+          totalSeats: 45,
+          availableSeats: 45,
+          status: 'active',
+          route: 'Salem - Namakkal - Karur - Dindigul - Madurai - Virudhunagar - Tirunelveli - Nagercoil - Thiruvananthapuram',
+          stopsWithFares: stops,
+        },
+      });
+
+      await prisma.bus.create({
+        data: {
+          busNumber: 'SB-303',
+          busName: 'Salem-TVM AC Multi-Axle',
+          source: 'Salem',
+          destination: 'Thiruvananthapuram',
+          departureTime: '21:00',
+          arrivalTime: '10:30',
+          fare: 2370,
+          totalSeats: 40,
+          availableSeats: 40,
+          status: 'active',
+          route: 'Salem - Namakkal - Karur - Dindigul - Madurai - Virudhunagar - Tirunelveli - Nagercoil - Thiruvananthapuram',
+          stopsWithFares: stops,
+        },
+      });
+
+      console.log('🌱 Auto-seed complete!');
+    }
+  } catch (err) {
+    console.error('⚠️ Auto-seed failed:', err);
+  }
 });
