@@ -70,6 +70,9 @@ int currentBoardingIndex = 0;
 int currentDestIndex = 1; 
 int simulatedWalletBalance = 3000;
 
+// Global WiFi Client (Prevents Stack Overflow)
+WiFiClientSecure secureClient;
+
 // ==========================================
 // HARDWARE CONTROL MODULES
 // ==========================================
@@ -95,7 +98,7 @@ void showLCD(String row1, String row2) {
 void buzzerValid() {
   // 1 short beep
   digitalWrite(BUZZER_PIN, HIGH);
-  delay(150);
+  delay(300);
   digitalWrite(BUZZER_PIN, LOW);
 }
 
@@ -103,9 +106,9 @@ void buzzerNotBooked() {
   // 2 short beeps
   for(int i=0; i<2; i++){
     digitalWrite(BUZZER_PIN, HIGH);
-    delay(150);
+    delay(250);
     digitalWrite(BUZZER_PIN, LOW);
-    if(i==0) delay(150);
+    if(i==0) delay(250);
   }
 }
 
@@ -113,10 +116,19 @@ void buzzerInvalid() {
   // 3 short beeps
   for(int i=0; i<3; i++){
     digitalWrite(BUZZER_PIN, HIGH);
-    delay(150);
+    delay(200);
     digitalWrite(BUZZER_PIN, LOW);
-    if(i<2) delay(150);
+    if(i<2) delay(200);
   }
+}
+
+void buzzerCardRead() {
+  // Instant feedback on tap
+  greenLED(true);
+  digitalWrite(BUZZER_PIN, HIGH);
+  delay(100);
+  digitalWrite(BUZZER_PIN, LOW);
+  greenLED(false);
 }
 
 void buzzerGPSPickup() {
@@ -157,11 +169,8 @@ bool readRFID(String &uidStr) {
 int checkBooking(String uid, String &outSeat) {
   if (WiFi.status() != WL_CONNECTED) return -1; // Network error
 
-  WiFiClientSecure client;
-  client.setInsecure(); // Required for HTTPS
-  
   HTTPClient http;
-  http.begin(client, apiEndpoint);
+  http.begin(secureClient, apiEndpoint);
   http.addHeader("Content-Type", "application/json");
   
   String httpRequestData = "{\"uid\":\"" + uid + "\",\"bus_number\":\"" + String(HARDCODED_BUS_NUMBER) + "\"}";
@@ -270,6 +279,7 @@ void setup() {
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println("\nWiFi Connected!");
     showLCD("Smart Bus System", "WiFi Connected!");
+    secureClient.setInsecure(); // Initialize SSL to ignore certificates
   } else {
     Serial.println("\nWiFi Failed!");
     showLCD("Smart Bus System", "WiFi Failed!");
@@ -321,6 +331,7 @@ void loop() {
       }
       
       if (readRFID(lastScannedUID)) {
+         buzzerCardRead();
          changeState(STATE_VERIFYING_RFID_API);
       }
       break;
