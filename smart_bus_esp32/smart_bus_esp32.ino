@@ -112,6 +112,13 @@ void buzzerNotBooked() {
   }
 }
 
+void buzzerInvalidLong() {
+  // 1 long sound for Not Registered / Invalid
+  digitalWrite(BUZZER_PIN, HIGH);
+  delay(2000); // 2 second long beep
+  digitalWrite(BUZZER_PIN, LOW);
+}
+
 void buzzerInvalid() {
   // 3 short beeps
   for(int i=0; i<3; i++){
@@ -222,6 +229,7 @@ void cycleBusType() {
 enum SystemState {
   STATE_STANDBY,
   STATE_VERIFYING_RFID_API,
+  STATE_RFID_INVALID,
   STATE_RFID_SCANNED_NO_BOOKING,
   STATE_RFID_SCANNED_BOOKED,
   STATE_RFID_ALREADY_BOARDED,
@@ -302,6 +310,11 @@ void loop() {
   if (key) {
     Serial.print("Keypad Pressed: ");
     Serial.println(key);
+    
+    // Light button click sound
+    digitalWrite(BUZZER_PIN, HIGH);
+    delay(40); // very fast beep
+    digitalWrite(BUZZER_PIN, LOW);
   }
 
   unsigned long currentTime = millis();
@@ -347,6 +360,8 @@ void loop() {
            changeState(STATE_RFID_SCANNED_BOOKED);
         } else if (responseCode == 409) {
            changeState(STATE_RFID_ALREADY_BOARDED);
+        } else if (responseCode == 401) {
+           changeState(STATE_RFID_INVALID);
         } else if (responseCode == 404) {
            changeState(STATE_RFID_SCANNED_NO_BOOKING);
         } else {
@@ -354,6 +369,20 @@ void loop() {
            changeState(STATE_RFID_SCANNED_NO_BOOKING);
         }
         stateJustChanged = false;
+      }
+      break;
+
+    // ----------------------------------------------------
+    case STATE_RFID_INVALID:
+      if (stateJustChanged) {
+        showLCD("Card Invalid", "Not Registered!");
+        redLED(true);
+        buzzerInvalidLong();
+        stateJustChanged = false;
+      }
+      if (elapsedTime >= 2000) {
+        redLED(false);
+        changeState(STATE_STANDBY); 
       }
       break;
 
@@ -413,7 +442,11 @@ void loop() {
         showLCD("Walk-in Booking", "Press A:Yes C:No");
         stateJustChanged = false;
       }
-      if (key == 'A') changeState(STATE_BOARDING_LOC);
+      if (key == 'A') {
+         currentBoardingIndex = 0; // Hardcoded to Salem for prototype
+         currentDestIndex = 1;
+         changeState(STATE_DEST_MENU);
+      }
       else if (key == 'C') changeState(STATE_CANCELLED);
       else if (elapsedTime >= 10000) changeState(STATE_TIMEOUT);
       break;
@@ -426,7 +459,9 @@ void loop() {
       }
       if (key >= '1' && key <= '9') {
         ticketCount = key - '0';
-        changeState(STATE_BOARDING_LOC);
+        currentBoardingIndex = 0; // Hardcoded to Salem for prototype
+        currentDestIndex = 1;
+        changeState(STATE_DEST_MENU);
       } else if (key == 'C') {
         changeState(STATE_CANCELLED);
       }

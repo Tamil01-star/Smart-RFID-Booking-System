@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { User, CreditCard, Plus, X } from 'lucide-react';
+import { User, CreditCard, Plus, X, Trash2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
 import RFIDInput from '../../components/RFIDInput';
 import type { PassengerCategory } from '../../types';
+import { API_URL } from '../../config';
 
 export default function PassengerManagement() {
-  const { adminCreatePassenger } = useAuth();
+  const { adminCreatePassenger, deleteAccount } = useAuth();
   const [passengers, setPassengers] = useState<any[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -18,19 +19,36 @@ export default function PassengerManagement() {
   const [category, setCategory] = useState<PassengerCategory>('general');
   const [rfidUid, setRfidUid] = useState('');
 
-  const loadPassengers = () => {
+  const loadPassengers = async () => {
     try {
-      const stored = localStorage.getItem('smartbus_users');
-      if (stored) {
-        const users = JSON.parse(stored);
+      const res = await fetch(`${API_URL}/users`);
+      if (res.ok) {
+        const users = await res.json();
         setPassengers(users.filter((u: any) => u.role === 'passenger'));
       }
-    } catch {}
+    } catch (err) {
+      console.error('Failed to load passengers:', err);
+    }
   };
 
   useEffect(() => {
     loadPassengers();
   }, []);
+
+  const handleDeletePassenger = async (passenger: any) => {
+    if (!confirm(`Are you sure you want to permanently delete passenger ${passenger.name} (${passenger.passengerId})?\nThis will also delete their RFID card, wallet, booking history, and transaction logs.`)) {
+      return;
+    }
+    setLoading(true);
+    const result = await deleteAccount(passenger.id);
+    setLoading(false);
+    if (result.success) {
+      toast.success('Passenger deleted successfully');
+      loadPassengers();
+    } else {
+      toast.error(result.error || 'Failed to delete passenger');
+    }
+  };
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -91,6 +109,7 @@ export default function PassengerManagement() {
                 <th>Email / Phone</th>
                 <th>RFID</th>
                 <th>Status</th>
+                <th className="text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -124,11 +143,21 @@ export default function PassengerManagement() {
                       {p.status.toUpperCase()}
                     </span>
                   </td>
+                  <td className="text-right">
+                    <button
+                      onClick={() => handleDeletePassenger(p)}
+                      disabled={loading}
+                      className="text-red-600 hover:text-red-900 transition-colors p-1"
+                      title="Delete Passenger"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </td>
                 </tr>
               ))}
               {passengers.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="text-center py-8 text-gray-500">No passengers found</td>
+                  <td colSpan={6} className="text-center py-8 text-gray-500">No passengers found</td>
                 </tr>
               )}
             </tbody>

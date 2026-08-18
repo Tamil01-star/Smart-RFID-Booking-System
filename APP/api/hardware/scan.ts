@@ -22,7 +22,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 1. Check if RFID exists and is linked
     const cardRes = await query(`SELECT passenger_id, status FROM rfid_cards WHERE uid = $1`, [uid]);
     if (cardRes.rows.length === 0) {
-      return res.status(404).json({ success: false, message: 'Card not registered' });
+      return res.status(401).json({ success: false, message: 'Card not registered' });
     }
     
     const card = cardRes.rows[0];
