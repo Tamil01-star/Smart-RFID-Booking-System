@@ -34,8 +34,13 @@ export default function PassengerManagement() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if ((rfidUid.length < 8 || rfidUid.length > 12) && rfidUid.length > 0) {
-      toast.error('RFID must be between 8 and 12 characters (4 to 6 bytes)');
+    const cleanUid = rfidUid.replace(/\s/g, '');
+    if (!cleanUid) {
+      toast.error('RFID Card Number is mandatory');
+      return;
+    }
+    if (cleanUid.length !== 8) {
+      toast.error('RFID must be exactly 8 characters (4 bytes)');
       return;
     }
 
@@ -172,11 +177,11 @@ export default function PassengerManagement() {
               </div>
 
               <div>
-                <label className="input-label">RFID Card Number (Optional)</label>
+                <label className="input-label">RFID Card Number</label>
                 <div className="p-4 bg-gray-50 rounded-xl border border-gray-100 flex justify-center">
                   <RFIDInput value={rfidUid} onChange={setRfidUid} />
                 </div>
-                <p className="text-xs text-gray-500 mt-2 text-center">Enter the 6-byte RFID UID. E.g., AA BB CC DD EE FF</p>
+                <p className="text-xs text-gray-500 mt-2 text-center">Enter the 4-byte RFID UID. E.g., CO 53 F7 54</p>
               </div>
 
               <div className="pt-4 flex gap-3">

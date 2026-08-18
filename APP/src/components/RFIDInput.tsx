@@ -1,16 +1,16 @@
 import React, { useRef, useState, useEffect } from 'react';
 
 interface RFIDInputProps {
-  value: string; // Expected format: 'CA53F7540000' or similar (hex without spaces)
+  value: string; // Expected format: 'CA53F754' without spaces
   onChange: (value: string) => void;
 }
 
 export default function RFIDInput({ value, onChange }: RFIDInputProps) {
-  // Convert hex string to 6 boxes of 2 characters each
+  // Convert hex string to 4 boxes of 2 characters each (4 bytes = 8 characters)
   const parseValueToBoxes = (val: string) => {
-    const boxes = Array(6).fill('');
+    const boxes = Array(4).fill('');
     const cleanVal = val.replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 4; i++) {
       boxes[i] = cleanVal.substring(i * 2, i * 2 + 2);
     }
     return boxes;
@@ -31,16 +31,16 @@ export default function RFIDInput({ value, onChange }: RFIDInputProps) {
   const handleChange = (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
     let val = e.target.value.replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
     
-    // If they pasted a whole UID (e.g. 8-12 hex characters), distribute 2-by-2
+    // If they pasted a whole UID (e.g. 8 hex characters), distribute 2-by-2
     if (val.length > 2) {
       const cleanVal = val.replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
       const newBoxes = [...boxes];
-      for (let i = 0; i < 6 && i * 2 < cleanVal.length; i++) {
+      for (let i = 0; i < 4 && i * 2 < cleanVal.length; i++) {
         newBoxes[i] = cleanVal.substring(i * 2, i * 2 + 2);
       }
       updateValue(newBoxes);
       // Focus the last filled box
-      const lastIndex = Math.min(5, Math.floor((cleanVal.length - 1) / 2));
+      const lastIndex = Math.min(3, Math.floor((cleanVal.length - 1) / 2));
       inputsRef.current[lastIndex]?.focus();
       return;
     }
@@ -50,7 +50,7 @@ export default function RFIDInput({ value, onChange }: RFIDInputProps) {
     updateValue(newBoxes);
 
     // Auto-advance to next box when current box has 2 characters
-    if (val.length === 2 && index < 5) {
+    if (val.length === 2 && index < 3) {
       inputsRef.current[index + 1]?.focus();
     }
   };

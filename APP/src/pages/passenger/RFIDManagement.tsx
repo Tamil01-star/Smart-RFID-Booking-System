@@ -23,8 +23,8 @@ export default function RFIDManagement() {
 
   const handleLink = async () => {
     if (!user || !uid.trim()) { toast.error('Please enter an RFID UID'); return; }
-    if (!/^[A-Fa-f0-9]{8,12}$/.test(uid.replace(/\s/g, ''))) {
-      toast.error('Invalid RFID UID format. Enter 8 to 12 hex characters (e.g. CA53F754)');
+    if (!/^[A-Fa-f0-9]{8}$/.test(uid.replace(/\s/g, ''))) {
+      toast.error('Invalid RFID UID format. Must be exactly 8 characters (e.g., CO53F754)');
       return;
     }
     setLinking(true);
