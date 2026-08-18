@@ -1,8 +1,7 @@
-// ==================== CITIES ====================
 export const CITIES = [
-  'Salem', 'Chennai', 'Coimbatore', 'Trichy',
-  'Madurai', 'Bangalore', 'Pondicherry', 'Vellore',
-  'Erode', 'Namakkal', 'Karur', 'Villupuram',
+  'Salem', 'Namakkal', 'Karur', 'Dindigul', 'Madurai',
+  'Virudhunagar', 'Tirunelveli', 'Nagercoil', 'Thiruvananthapuram',
+  'Chennai', 'Coimbatore', 'Trichy', 'Bangalore', 'Pondicherry', 'Vellore', 'Erode', 'Villupuram'
 ];
 
 // ==================== PRESET AMOUNTS ====================

@@ -1,17 +1,17 @@
 import React, { useRef, useState, useEffect } from 'react';
 
 interface RFIDInputProps {
-  value: string; // Expected format: 'AABBCCDDEEFF' without spaces
+  value: string; // Expected format: 'CA53F754' without spaces
   onChange: (value: string) => void;
 }
 
 export default function RFIDInput({ value, onChange }: RFIDInputProps) {
-  // Convert 'AABBCCDDEEFF' to ['AA', 'BB', 'CC', 'DD', 'EE', 'FF']
+  // Convert 'CA53F754' to ['C', 'A', '5', '3', 'F', '7', '5', '4']
   const parseValueToBoxes = (val: string) => {
-    const boxes = Array(6).fill('');
+    const boxes = Array(8).fill('');
     const cleanVal = val.replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
-    for (let i = 0; i < 6; i++) {
-      boxes[i] = cleanVal.substring(i * 2, i * 2 + 2);
+    for (let i = 0; i < 8; i++) {
+      boxes[i] = cleanVal.substring(i, i + 1);
     }
     return boxes;
   };
@@ -32,15 +32,15 @@ export default function RFIDInput({ value, onChange }: RFIDInputProps) {
     let val = e.target.value.replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
     
     // If they pasted a whole UID into one box, distribute it
-    if (val.length > 2) {
+    if (val.length > 1) {
       const cleanVal = val.replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
       const newBoxes = [...boxes];
-      for (let i = 0; i < 6 && (i * 2) < cleanVal.length; i++) {
-        newBoxes[i] = cleanVal.substring(i * 2, i * 2 + 2);
+      for (let i = 0; i < 8 && i < cleanVal.length; i++) {
+        newBoxes[i] = cleanVal.substring(i, i + 1);
       }
       updateValue(newBoxes);
       // Focus the last filled box
-      const lastIndex = Math.min(5, Math.floor((cleanVal.length - 1) / 2));
+      const lastIndex = Math.min(7, cleanVal.length - 1);
       inputsRef.current[lastIndex]?.focus();
       return;
     }
@@ -50,7 +50,7 @@ export default function RFIDInput({ value, onChange }: RFIDInputProps) {
     updateValue(newBoxes);
 
     // Auto-advance
-    if (val.length === 2 && index < 5) {
+    if (val.length === 1 && index < 7) {
       inputsRef.current[index + 1]?.focus();
     }
   };
@@ -62,18 +62,18 @@ export default function RFIDInput({ value, onChange }: RFIDInputProps) {
   };
 
   return (
-    <div className="flex gap-2">
+    <div className="flex gap-1.5">
       {boxes.map((boxVal, index) => (
         <input
           key={index}
           ref={(el) => (inputsRef.current[index] = el)}
           type="text"
-          maxLength={14} // Allow paste
+          maxLength={8} // Allow paste
           value={boxVal}
           onChange={(e) => handleChange(index, e)}
           onKeyDown={(e) => handleKeyDown(index, e)}
-          className="w-12 h-12 text-center text-lg font-bold border border-gray-300 rounded-lg shadow-sm focus:border-primary-500 focus:ring-primary-500 uppercase tracking-wider"
-          placeholder="00"
+          className="w-10 h-10 text-center text-lg font-bold border border-gray-300 rounded-lg shadow-sm focus:border-primary-500 focus:ring-primary-500 uppercase tracking-wider bg-white text-gray-900"
+          placeholder="0"
         />
       ))}
     </div>

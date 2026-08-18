@@ -35,14 +35,31 @@ export const busService = {
       const res = await fetch(`${API_URL}/buses`);
       if (!res.ok) return [];
       const buses: Bus[] = await res.json();
-      return buses.filter(
-        b => b.source === source && b.destination === destination && b.status !== 'inactive'
-      );
+      return buses.filter(b => {
+        if (b.status === 'inactive') return false;
+        
+        // Exact match
+        if (b.source.toLowerCase() === source.toLowerCase() && b.destination.toLowerCase() === destination.toLowerCase()) {
+          return true;
+        }
+        
+        // Check intermediate stops
+        if (b.stopsWithFares && Array.isArray(b.stopsWithFares)) {
+          const boardingStop = b.stopsWithFares.find(
+            (s: any) => s.stopName.toLowerCase() === source.toLowerCase()
+          );
+          const dropStop = b.stopsWithFares.find(
+            (s: any) => s.stopName.toLowerCase() === destination.toLowerCase()
+          );
+          return boardingStop && dropStop && boardingStop.order !== undefined && dropStop.order !== undefined && dropStop.order > boardingStop.order;
+        }
+        
+        return false;
+      });
     } catch {
       return [];
     }
   },
-
   addBus: async (bus: Omit<Bus, 'id'>): Promise<Bus> => {
     const res = await fetch(`${API_URL}/buses`, {
       method: 'POST',
@@ -117,16 +134,15 @@ export const transactionService = {
       return [];
     }
   },
-};
-
-// ==================== BOOKING SERVICE ====================
-export const bookingService = {
+};export const bookingService = {
   createBooking: async (data: {
     passengerId: string;
     passengerName: string;
     busId: string;
     travelDate: string;
     rfidUid?: string;
+    source?: string;
+    destination?: string;
   }): Promise<{ success: boolean; booking?: Booking; error?: string }> => {
     try {
       const res = await fetch(`${API_URL}/bookings/create`, {

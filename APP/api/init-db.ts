@@ -51,6 +51,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         passenger_id VARCHAR(50) REFERENCES users(passenger_id),
         bus_id INT REFERENCES buses(id),
         travel_date DATE NOT NULL,
+        seat_number VARCHAR(10),
         fare DECIMAL(10, 2) NOT NULL,
         rfid_linked BOOLEAN DEFAULT FALSE,
         status VARCHAR(20) DEFAULT 'confirmed',

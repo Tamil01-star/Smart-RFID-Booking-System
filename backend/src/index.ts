@@ -544,21 +544,55 @@ app.get('/api/bookings', async (req, res) => {
 });
 
 app.post('/api/bookings/create', async (req, res) => {
-  const { passengerId, passengerName, busId, travelDate, rfidUid } = req.body;
+  const { passengerId, passengerName, busId, travelDate, rfidUid, source, destination } = req.body;
   try {
     const bus = await prisma.bus.findUnique({ where: { id: busId } });
     if (!bus) return res.status(404).json({ error: 'Bus not found' });
     if (bus.availableSeats <= 0) return res.status(400).json({ error: 'Bus is full' });
 
+    // Dynamic stop-to-stop fare and route calculation
+    let bookingFare = bus.fare;
+    let bookingSource = bus.source;
+    let bookingDestination = bus.destination;
+
+    if (source && destination && bus.stopsWithFares) {
+      const stops = bus.stopsWithFares as any[];
+      const fromStop = stops.find((s: any) => s.stopName.toLowerCase() === source.toLowerCase());
+      const toStop = stops.find((s: any) => s.stopName.toLowerCase() === destination.toLowerCase());
+
+      if (fromStop && toStop) {
+        if (fromStop.order >= toStop.order) {
+          return res.status(400).json({ error: 'Destination stop must be after boarding stop' });
+        }
+        const distanceKm = toStop.distance - fromStop.distance;
+        let farePerKm = 2.00;
+        
+        // Determine fare per km based on bus configuration
+        const type = (bus.busName || '').toLowerCase();
+        if (type.includes('ac')) {
+          farePerKm = 4.00;
+        } else if (type.includes('superfast') || type.includes('express')) {
+          farePerKm = 2.75;
+        } else {
+          farePerKm = 2.00;
+        }
+
+        const calculatedFare = distanceKm * farePerKm;
+        bookingFare = Math.round(calculatedFare / 5) * 5;
+        bookingSource = fromStop.stopName;
+        bookingDestination = toStop.stopName;
+      }
+    }
+
     // Deduct fare from wallet
     let wallet = await prisma.wallet.findUnique({ where: { passengerId } });
-    if (!wallet || wallet.balance < bus.fare) {
+    if (!wallet || wallet.balance < bookingFare) {
       // Record failed transaction log
       await prisma.walletTransaction.create({
         data: {
           passengerId,
           type: 'FARE_DEDUCTION',
-          amount: bus.fare,
+          amount: bookingFare,
           description: `Fare deduction failed: Insufficient balance for ${bus.busNumber}`,
           balanceBefore: wallet ? wallet.balance : 0.0,
           balanceAfter: wallet ? wallet.balance : 0.0,
@@ -571,7 +605,7 @@ app.post('/api/bookings/create', async (req, res) => {
     }
 
     const balanceBefore = wallet.balance;
-    const balanceAfter = balanceBefore - bus.fare;
+    const balanceAfter = balanceBefore - bookingFare;
 
     // Deduct fare & update seats
     await prisma.$transaction([
@@ -581,8 +615,8 @@ app.post('/api/bookings/create', async (req, res) => {
         data: {
           passengerId,
           type: 'FARE_DEDUCTION',
-          amount: bus.fare,
-          description: `Bus fare ticket booking - ${bus.busNumber}`,
+          amount: bookingFare,
+          description: `Bus fare ticket booking (${bookingSource} → ${bookingDestination}) - ${bus.busNumber}`,
           balanceBefore,
           balanceAfter,
           status: 'success',
@@ -600,19 +634,19 @@ app.post('/api/bookings/create', async (req, res) => {
         passengerName,
         busId,
         busNumber: bus.busNumber,
-        source: bus.source,
-        destination: bus.destination,
+        source: bookingSource,
+        destination: bookingDestination,
         travelDate,
         departureTime: bus.departureTime,
         arrivalTime: bus.arrivalTime,
-        fare: bus.fare,
+        fare: bookingFare,
         status: 'confirmed',
         rfidUid,
         rfidLinked: !!rfidUid
       }
     });
 
-    await logEvent('success', `Booking ${bookingId} confirmed for ${passengerName}`, 'Booking Service');
+    await logEvent('success', `Booking ${bookingId} confirmed for ${passengerName} (${bookingSource} → ${bookingDestination})`, 'Booking Service');
 
     res.json({ success: true, booking });
   } catch (err: any) {

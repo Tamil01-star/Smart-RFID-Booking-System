@@ -36,19 +36,71 @@ export default function BookBus() {
     setLoading(false);
   };
 
+  const getDynamicFare = (bus: BusType) => {
+    if (source && destination && bus.stopsWithFares && Array.isArray(bus.stopsWithFares)) {
+      const fromStop = bus.stopsWithFares.find(
+        (s: any) => s.stopName.toLowerCase() === source.toLowerCase()
+      );
+      const toStop = bus.stopsWithFares.find(
+        (s: any) => s.stopName.toLowerCase() === destination.toLowerCase()
+      );
+      if (fromStop && toStop && 
+          fromStop.order !== undefined && toStop.order !== undefined && 
+          fromStop.distance !== undefined && toStop.distance !== undefined && 
+          toStop.order > fromStop.order) {
+        const distanceKm = toStop.distance - fromStop.distance;
+        let farePerKm = 2.00;
+        
+        const type = (bus.busName || '').toLowerCase();
+        if (type.includes('ac')) {
+          farePerKm = 4.00;
+        } else if (type.includes('superfast') || type.includes('express')) {
+          farePerKm = 2.75;
+        } else {
+          farePerKm = 2.00;
+        }
+        
+        const calculatedFare = distanceKm * farePerKm;
+        return Math.round(calculatedFare / 5) * 5;
+      }
+    }
+    return bus.fare;
+  };
+
+  const getDynamicDistance = (bus: BusType) => {
+    if (source && destination && bus.stopsWithFares && Array.isArray(bus.stopsWithFares)) {
+      const fromStop = bus.stopsWithFares.find(
+        (s: any) => s.stopName.toLowerCase() === source.toLowerCase()
+      );
+      const toStop = bus.stopsWithFares.find(
+        (s: any) => s.stopName.toLowerCase() === destination.toLowerCase()
+      );
+      if (fromStop && toStop && 
+          fromStop.order !== undefined && toStop.order !== undefined && 
+          fromStop.distance !== undefined && toStop.distance !== undefined && 
+          toStop.order > fromStop.order) {
+        return toStop.distance - fromStop.distance;
+      }
+    }
+    return null;
+  };
+
   const handleBook = async (bus: BusType) => {
     if (!user) return;
     setBooking({ busId: bus.id });
+    const fare = getDynamicFare(bus);
     const result = await bookingService.createBooking({
       passengerId: user.passengerId,
       passengerName: user.name,
       busId: bus.id,
       travelDate: date,
       rfidUid,
+      source,
+      destination
     });
     if (result.success && result.booking) {
       setConfirmedBooking(result.booking);
-      toast.success('Booking confirmed! ₹' + bus.fare + ' deducted from wallet');
+      toast.success('Booking confirmed! ₹' + fare + ' deducted from wallet');
     } else {
       toast.error(result.error || 'Booking failed');
     }
@@ -188,14 +240,22 @@ export default function BookBus() {
               <div className="flex items-center gap-4 text-sm text-gray-700 mb-3">
                 <div className="flex items-center gap-1.5">
                   <div className="w-2 h-2 rounded-full bg-green-500" />
-                  <span className="font-semibold">{bus.source}</span>
+                  <span className="font-semibold">{source || bus.source}</span>
                 </div>
                 <div className="flex-1 border-t border-dashed border-gray-300" />
                 <div className="flex items-center gap-1.5">
                   <div className="w-2 h-2 rounded-full bg-red-500" />
-                  <span className="font-semibold">{bus.destination}</span>
+                  <span className="font-semibold">{destination || bus.destination}</span>
                 </div>
               </div>
+
+              {getDynamicDistance(bus) !== null && (
+                <div className="text-xs text-gray-500 mb-3">
+                  Distance: <span className="font-semibold text-gray-700">{getDynamicDistance(bus)} km</span>
+                  {' • '}
+                  Rate: <span className="font-semibold text-gray-700">₹{(bus.busName.toLowerCase().includes('ac') ? 4.00 : bus.busName.toLowerCase().includes('express') || bus.busName.toLowerCase().includes('superfast') ? 2.75 : 2.00).toFixed(2)}/km</span>
+                </div>
+              )}
 
               {bus.route && <div className="text-xs text-gray-400 mb-3">{bus.route}</div>}
 
@@ -212,7 +272,7 @@ export default function BookBus() {
             </div>
 
             <div className="flex sm:flex-col items-center sm:items-end gap-4 sm:gap-3 sm:min-w-[130px]">
-              <div className="text-3xl font-black text-primary-900">₹{bus.fare}</div>
+              <div className="text-3xl font-black text-primary-900">₹{getDynamicFare(bus)}</div>
               <button
                 onClick={() => handleBook(bus)}
                 disabled={bus.status === 'full' || bus.availableSeats === 0 || booking?.busId === bus.id}

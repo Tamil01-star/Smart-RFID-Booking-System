@@ -34,8 +34,8 @@ export default function PassengerManagement() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (rfidUid.length !== 12 && rfidUid.length > 0) {
-      toast.error('RFID must be exactly 6 bytes (12 characters)');
+    if (rfidUid.length !== 8 && rfidUid.length > 0) {
+      toast.error('RFID must be exactly 8 characters (4 bytes)');
       return;
     }
 

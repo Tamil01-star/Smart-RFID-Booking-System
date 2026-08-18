@@ -23,8 +23,8 @@ export default function RFIDManagement() {
 
   const handleLink = async () => {
     if (!user || !uid.trim()) { toast.error('Please enter an RFID UID'); return; }
-    if (!/^[A-Fa-f0-9]{6,12}$/.test(uid.replace(/\s/g, ''))) {
-      toast.error('Invalid RFID UID format. Example: A1B2C3D4');
+    if (!/^[A-Fa-f0-9]{8}$/.test(uid.replace(/\s/g, ''))) {
+      toast.error('Invalid RFID UID format. Example: CA53F754');
       return;
     }
     setLinking(true);
@@ -114,8 +114,8 @@ export default function RFIDManagement() {
                   value={uid}
                   onChange={e => setUid(e.target.value.toUpperCase())}
                   className="input font-mono"
-                  placeholder="e.g. A1B2C3D4"
-                  maxLength={12}
+                  placeholder="e.g. CA53F754"
+                  maxLength={8}
                 />
                 <button onClick={handleLink} disabled={linking || !uid} className="btn-primary flex-shrink-0">
                   {linking ? <span className="animate-spin inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full" /> : <Link2 className="w-4 h-4" />}

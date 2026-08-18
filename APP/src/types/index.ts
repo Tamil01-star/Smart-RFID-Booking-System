@@ -20,7 +20,9 @@ export type BusStatus = 'active' | 'inactive' | 'full' | 'scheduled';
 
 export interface StopFare {
   stopName: string;
-  fare: number;
+  fare?: number;
+  distance?: number;
+  order?: number;
 }
 
 export interface Bus {

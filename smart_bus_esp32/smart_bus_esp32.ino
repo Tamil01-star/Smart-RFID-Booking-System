@@ -1,4 +1,5 @@
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
@@ -12,6 +13,9 @@ const char* password = "********";
 
 // LIVE API Endpoint
 const char* apiEndpoint = "https://smart-rfid-booking-system-tawny.vercel.app/api/hardware/scan";
+
+// HARDCODED BUS NUMBER
+const char* HARDCODED_BUS_NUMBER = "NS893";
 
 // ==========================================
 // PIN DEFINITIONS
@@ -42,33 +46,34 @@ MFRC522 rfid(SS_PIN, RST_PIN);
 Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
 
 // ==========================================
-// PASSENGER CATEGORIES & PRICING
+// DYNAMIC FARE SYSTEM (FROM SPEC)
 // ==========================================
-enum PassengerCategory {
-  CAT_GENERAL,       // 100% Fare
-  CAT_STUDENT,       // 50% Fare
-  CAT_SENIOR,        // 40% Fare
-  CAT_DISABLED,      // 25% Fare
-  CAT_EX_SERVICEMAN  // Free (0)
+enum BusType {
+  BUS_ORDINARY,
+  BUS_EXPRESS,
+  BUS_AC
 };
 
-PassengerCategory currentCategory = CAT_GENERAL;
+BusType currentBusType = BUS_ORDINARY;
 
-int calculateFare(int baseFare, PassengerCategory category) {
-  switch(category) {
-    case CAT_STUDENT: return baseFare * 0.50; 
-    case CAT_SENIOR: return baseFare * 0.40;
-    case CAT_DISABLED: return baseFare * 0.25;
-    case CAT_EX_SERVICEMAN: return 0;
-    case CAT_GENERAL:
-    default: return baseFare;
-  }
+void cycleBusType() {
+  currentBusType = (BusType)(((int)currentBusType + 1) % 3);
+  Serial.print("Demo Mode: Switched to Bus Type ");
+  Serial.println((int)currentBusType);
 }
 
-void cycleCategory() {
-  currentCategory = (PassengerCategory)(((int)currentCategory + 1) % 5);
-  Serial.print("Demo Mode: Switched to Category ID ");
-  Serial.println((int)currentCategory);
+const int NUM_STOPS = 9;
+String stopNames[NUM_STOPS] = {"1.Salem", "2.Namakkal", "3.Karur", "4.Dindigul", "5.Madurai", "6.V.Nagar", "7.T.Veli", "8.N.coil", "9.Tvm"};
+String shortNames[NUM_STOPS] = {"Salem", "N.kal", "Karur", "D.gul", "M.urai", "V.Ngr", "T.Veli", "N.coil", "Tvm"};
+int cumulativeDist[NUM_STOPS] = {0, 52, 97, 202, 267, 315, 440, 523, 593};
+float fareRates[3] = {2.00, 2.75, 4.00};
+
+int calculateFare(int startIdx, int endIdx, BusType type) {
+  if (startIdx >= endIdx) return 0;
+  int dist = cumulativeDist[endIdx] - cumulativeDist[startIdx];
+  float calculated = dist * fareRates[(int)type];
+  int finalFare = round(calculated / 5.0) * 5;
+  return finalFare;
 }
 
 // ==========================================
@@ -79,6 +84,7 @@ enum SystemState {
   STATE_VERIFYING_RFID_API,
   STATE_RFID_SCANNED_NO_BOOKING,
   STATE_RFID_SCANNED_BOOKED,
+  STATE_RFID_ALREADY_BOARDED,
   STATE_RFID_LOW_BALANCE,
   STATE_WALKIN_PROMPT,
   STATE_MULTIPLE_BOOKING_PROMPT,
@@ -94,7 +100,7 @@ enum SystemState {
   STATE_TIMEOUT
 };
 
-// Manually declare prototype to fix Arduino IDE compilation error
+// Manually declare prototype
 void changeState(SystemState newState);
 
 SystemState currentState = STATE_STANDBY;
@@ -103,17 +109,15 @@ unsigned long stateStartTime = 0;
 
 // Booking Variables
 String lastScannedUID = "";
+String assignedSeat = "TBD";
 int ticketCount = 1;
-int currentDestIndex = 0; 
-const int NUM_DESTINATIONS = 4;
-String destinations[NUM_DESTINATIONS] = {"1.Tiruchengode", "2.Erode", "3.Tiruppur", "4.Coimbatore"};
-String shortNames[NUM_DESTINATIONS] = {"T.Gode", "Erode", "T.Pur", "CBE"}; // Shortened to fit 16x2 LCD
+int currentBoardingIndex = 0;
+int currentDestIndex = 1; 
 
-int baseFares[NUM_DESTINATIONS] = {30, 60, 85, 115}; 
-int simulatedWalletBalance = 300;
+int simulatedWalletBalance = 3000;
 
 // ==========================================
-// SETUP & INITIALIZATION
+// SETUP
 // ==========================================
 void setup() {
   Serial.begin(115200);
@@ -139,7 +143,7 @@ void setup() {
   
   Serial.print("Connecting to WiFi");
   int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 20) { // 10s timeout
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) { 
     delay(500);
     Serial.print(".");
     attempts++;
@@ -184,18 +188,19 @@ void loop() {
       if (stateJustChanged) {
         lcd.clear();
         lcd.setCursor(0, 0);
-        lcd.print("SmartBus Ready");
+        lcd.print("Bus: ");
+        lcd.print(HARDCODED_BUS_NUMBER);
         lcd.setCursor(0, 1);
-        lcd.print("Tap RFID to Board");
+        lcd.print("Tap RFID to Brd ");
         stateJustChanged = false;
       }
       
       if (key == 'A') {
          ticketCount = 1;
-         cycleCategory(); 
+         cycleBusType(); 
          changeState(STATE_WALKIN_PROMPT);
       } else if (key == 'B') {
-         cycleCategory(); 
+         cycleBusType(); 
          changeState(STATE_MULTIPLE_BOOKING_PROMPT);
       }
       
@@ -206,7 +211,7 @@ void loop() {
           lastScannedUID += String(rfid.uid.uidByte[i] < 0x10 ? "0" : "");
           lastScannedUID += String(rfid.uid.uidByte[i], HEX);
         }
-        lastScannedUID.toUpperCase(); // e.g. "A1B2C3D4"
+        lastScannedUID.toUpperCase(); 
 
         rfid.PICC_HaltA();
         rfid.PCD_StopCrypto1();
@@ -225,11 +230,14 @@ void loop() {
         lcd.print("Please wait...");
         
         if (WiFi.status() == WL_CONNECTED) {
+          WiFiClientSecure client;
+          client.setInsecure(); // Required for HTTPS
+          
           HTTPClient http;
-          http.begin(apiEndpoint);
+          http.begin(client, apiEndpoint);
           http.addHeader("Content-Type", "application/json");
           
-          String httpRequestData = "{\"uid\":\"" + lastScannedUID + "\",\"bus_id\":\"1\"}";
+          String httpRequestData = "{\"uid\":\"" + lastScannedUID + "\",\"bus_number\":\"" + String(HARDCODED_BUS_NUMBER) + "\"}";
           Serial.print("Sending POST: ");
           Serial.println(httpRequestData);
           
@@ -237,12 +245,22 @@ void loop() {
           
           if (httpResponseCode > 0) {
             String payload = http.getString();
-            Serial.print("HTTP Response code: ");
+            Serial.print("HTTP Response: ");
             Serial.println(httpResponseCode);
             Serial.println(payload);
             
             if (httpResponseCode == 200) {
+               int seatIndex = payload.indexOf("\"seatNumber\":\"");
+               if (seatIndex != -1) {
+                  seatIndex += 14;
+                  int endQuote = payload.indexOf("\"", seatIndex);
+                  assignedSeat = payload.substring(seatIndex, endQuote);
+               } else {
+                  assignedSeat = "TBD";
+               }
                changeState(STATE_RFID_SCANNED_BOOKED);
+            } else if (httpResponseCode == 409) {
+               changeState(STATE_RFID_ALREADY_BOARDED);
             } else if (httpResponseCode == 402) {
                changeState(STATE_RFID_LOW_BALANCE);
             } else {
@@ -282,7 +300,7 @@ void loop() {
       }
       if (elapsedTime >= 3000) {
         digitalWrite(RED_LED, LOW);
-        changeState(STATE_STANDBY); // Cannot board
+        changeState(STATE_STANDBY); 
       }
       break;
 
@@ -293,23 +311,54 @@ void loop() {
         lcd.setCursor(0, 0);
         lcd.print("Not Booked Early");
         lcd.setCursor(0, 1);
-        lcd.print("Walk-in starts..");
+        lcd.print("Manual Booking");
         
+        // Glow Red LED solidly
+        digitalWrite(RED_LED, HIGH);
+        
+        // Two times of buzzer
         for (int i = 0; i < 2; i++) {
-          digitalWrite(RED_LED, HIGH);
           digitalWrite(BUZZER, HIGH);
-          delay(300); 
+          delay(200); 
           digitalWrite(BUZZER, LOW);
-          digitalWrite(RED_LED, LOW);
-          delay(300); 
+          delay(200); 
         }
         
         stateJustChanged = false;
       }
-      if (elapsedTime >= 1500) {
+      if (elapsedTime >= 2000) {
+        digitalWrite(RED_LED, LOW); // Turn off Red LED before moving
         ticketCount = 1;
-        cycleCategory(); // Rotate category for Walk-in demo
+        cycleBusType(); 
         changeState(STATE_WALKIN_PROMPT); 
+      }
+      break;
+
+    // ----------------------------------------------------
+    case STATE_RFID_ALREADY_BOARDED:
+      if (stateJustChanged) {
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        
+        String shortUid = lastScannedUID;
+        if(shortUid.length() > 11) { shortUid = shortUid.substring(0, 11); }
+        lcd.print("ID: " + shortUid); 
+        
+        lcd.setCursor(0, 1);
+        lcd.print("Already Boarded"); 
+        
+        digitalWrite(GREEN_LED, LOW);
+        for(int i=0; i<3; i++){
+           digitalWrite(BUZZER, HIGH);
+           delay(100);
+           digitalWrite(BUZZER, LOW);
+           delay(100);
+        }
+        
+        stateJustChanged = false;
+      }
+      if (elapsedTime >= 3000) {
+        changeState(STATE_STANDBY); 
       }
       break;
 
@@ -318,19 +367,26 @@ void loop() {
       if (stateJustChanged) {
         lcd.clear();
         lcd.setCursor(0, 0);
-        lcd.print("ID: " + lastScannedUID); 
-        lcd.setCursor(0, 1);
-        lcd.print("Booked Seat 22B"); 
         
+        String shortUid = lastScannedUID;
+        if(shortUid.length() > 11) { shortUid = shortUid.substring(0, 11); }
+        lcd.print("ID: " + shortUid); 
+        
+        lcd.setCursor(0, 1);
+        lcd.print("Booked..Seat: " + assignedSeat); 
+        
+        // Glow Green LED solidly
         digitalWrite(GREEN_LED, HIGH);
+        
+        // Once buzzer will play (1 clear beep)
         digitalWrite(BUZZER, HIGH);
-        delay(1000); 
+        delay(400); 
         digitalWrite(BUZZER, LOW);
-        digitalWrite(GREEN_LED, LOW);
         
         stateJustChanged = false;
       }
       if (elapsedTime >= 3000) {
+        digitalWrite(GREEN_LED, LOW); 
         changeState(STATE_STANDBY); 
       }
       break;
@@ -374,13 +430,30 @@ void loop() {
       if (stateJustChanged) {
         lcd.clear();
         lcd.setCursor(0, 0);
-        lcd.print("Boarding From:");
+        lcd.print("Select Boarding:");
         lcd.setCursor(0, 1);
-        lcd.print("NAMAKKAL");
+        lcd.print(stopNames[currentBoardingIndex]);
         stateJustChanged = false;
-        currentDestIndex = 0; 
       }
-      if (elapsedTime >= 2500) changeState(STATE_DEST_MENU);
+      
+      if (key) {
+        if (key == '#') {
+          currentBoardingIndex = (currentBoardingIndex + 1) % (NUM_STOPS - 1);
+          stateJustChanged = true;
+        } else if (key == '*') {
+          currentBoardingIndex = (currentBoardingIndex - 1 + (NUM_STOPS - 1)) % (NUM_STOPS - 1);
+          stateJustChanged = true;
+        } else if (key == 'C') {
+          changeState(STATE_CANCELLED);
+        } else if (key >= '1' && key <= '8') { 
+          int selectedNumber = key - '0';
+          if (selectedNumber == (currentBoardingIndex + 1)) {
+            currentDestIndex = currentBoardingIndex + 1;
+            changeState(STATE_DEST_MENU);
+          }
+        }
+      }
+      if (elapsedTime >= 30000) changeState(STATE_TIMEOUT);
       break;
 
     // ----------------------------------------------------
@@ -390,20 +463,22 @@ void loop() {
         lcd.setCursor(0, 0);
         lcd.print("Select Dest:");
         lcd.setCursor(0, 1);
-        lcd.print(destinations[currentDestIndex]);
+        lcd.print(stopNames[currentDestIndex]);
         stateJustChanged = false;
       }
       
       if (key) {
         if (key == '#') {
-          currentDestIndex = (currentDestIndex + 1) % NUM_DESTINATIONS;
+          currentDestIndex++;
+          if (currentDestIndex >= NUM_STOPS) currentDestIndex = currentBoardingIndex + 1;
           stateJustChanged = true;
         } else if (key == '*') {
-          currentDestIndex = (currentDestIndex - 1 + NUM_DESTINATIONS) % NUM_DESTINATIONS;
+          currentDestIndex--;
+          if (currentDestIndex <= currentBoardingIndex) currentDestIndex = NUM_STOPS - 1;
           stateJustChanged = true;
         } else if (key == 'C') {
           changeState(STATE_CANCELLED);
-        } else if (key >= '1' && key <= '4') {
+        } else if (key >= '1' && key <= '9') {
           int selectedNumber = key - '0';
           if (selectedNumber == (currentDestIndex + 1)) {
             changeState(STATE_SELECTED_CONFIRM);
@@ -418,7 +493,7 @@ void loop() {
       if (stateJustChanged) {
         lcd.clear();
         lcd.setCursor(0, 0);
-        lcd.print("Selected:");
+        lcd.print("Selected Dest:");
         lcd.setCursor(0, 1);
         String name = shortNames[currentDestIndex];
         name.toUpperCase();
@@ -434,7 +509,7 @@ void loop() {
         lcd.clear();
         lcd.setCursor(0, 0);
         
-        int singleFare = calculateFare(baseFares[currentDestIndex], currentCategory);
+        int singleFare = calculateFare(currentBoardingIndex, currentDestIndex, currentBusType);
         int totalFare = singleFare * ticketCount;
         
         if (ticketCount > 1) {
@@ -444,7 +519,7 @@ void loop() {
         }
         
         lcd.setCursor(0, 1);
-        lcd.print("A=Yes C=Cancel"); // Shortened
+        lcd.print("A=Yes C=Cancel"); 
         stateJustChanged = false;
       }
       if (key == 'A') changeState(STATE_CHECKING_WALLET);
@@ -463,7 +538,7 @@ void loop() {
         stateJustChanged = false;
       }
       if (elapsedTime >= 800) {
-        int singleFare = calculateFare(baseFares[currentDestIndex], currentCategory);
+        int singleFare = calculateFare(currentBoardingIndex, currentDestIndex, currentBusType);
         int totalFare = singleFare * ticketCount;
         
         if (simulatedWalletBalance >= totalFare) {
@@ -499,11 +574,11 @@ void loop() {
         }
         
         lcd.setCursor(0, 1);
-        int singleFare = calculateFare(baseFares[currentDestIndex], currentCategory);
+        int singleFare = calculateFare(currentBoardingIndex, currentDestIndex, currentBusType);
         int totalFare = singleFare * ticketCount;
         int remaining = simulatedWalletBalance - totalFare;
         
-        lcd.print("Bal: Rs." + String(remaining)); // Removed "Enjoy!" to fit on screen
+        lcd.print("Bal: Rs." + String(remaining)); 
         
         digitalWrite(GREEN_LED, HIGH);
         digitalWrite(BUZZER, HIGH);
@@ -521,7 +596,7 @@ void loop() {
     // ----------------------------------------------------
     case STATE_LOW_BALANCE:
       if (stateJustChanged) {
-        int singleFare = calculateFare(baseFares[currentDestIndex], currentCategory);
+        int singleFare = calculateFare(currentBoardingIndex, currentDestIndex, currentBusType);
         int totalFare = singleFare * ticketCount;
         int shortfall = totalFare - simulatedWalletBalance;
         

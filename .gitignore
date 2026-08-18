@@ -59,3 +59,20 @@ smart_bus_flow_block_*.jpg
 smart_bus_graphical_*.jpg
 smart_bus_no_led_*.jpg
 smart_bus_block_*.jpg
+
+# Local project assets & slides (Kept on local disk, ignored from GitHub)
+*.png
+*.jpg
+*.jpeg
+*.pptx
+*.pdf
+*.mp4
+ai_innovations_both_projects.md
+complete_project_blueprint.md
+lcd_screen_navigation.md
+review1_presentation.md
+rfid_payment_innovations.md
+smart_hospital_blueprint.md
+i am doing to build a prototype pro.md
+Project Title.md
+WhatsApp Image*

@@ -6,13 +6,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { uid, bus_id } = req.body;
+  const { uid, bus_number } = req.body;
 
-  if (!uid || !bus_id) {
-    return res.status(400).json({ error: 'Missing uid or bus_id' });
+  if (!uid || !bus_number) {
+    return res.status(400).json({ error: 'Missing uid or bus_number' });
   }
 
   try {
+    // Lookup bus_id from bus_number
+    const busRes = await query(`SELECT id FROM buses WHERE bus_number = $1`, [bus_number]);
+    if (busRes.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Bus not found in database' });
+    }
+    const bus_id = busRes.rows[0].id;
     // 1. Check if RFID exists and is linked
     const cardRes = await query(`SELECT passenger_id, status FROM rfid_cards WHERE uid = $1`, [uid]);
     if (cardRes.rows.length === 0) {
@@ -26,45 +32,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const passengerId = card.passenger_id;
 
-    // 2. Get Bus Fare
-    const busRes = await query(`SELECT bus_number, fare FROM buses WHERE id = $1`, [bus_id]);
-    if (busRes.rows.length === 0) {
-      return res.status(404).json({ success: false, message: 'Bus not found' });
-    }
-    const { bus_number, fare } = busRes.rows[0];
+    // 2. Check for an existing valid booking for this passenger, on this bus, for today
+    // We assume travel_date is stored without time, so CURRENT_DATE works for exact matches.
+    const bookingRes = await query(`
+      SELECT id, booking_id, seat_number, status 
+      FROM bookings 
+      WHERE passenger_id = $1 AND bus_id = $2 AND travel_date = CURRENT_DATE
+      ORDER BY id DESC LIMIT 1
+    `, [passengerId, bus_id]);
 
-    // 3. Get Wallet Balance
-    const walletRes = await query(`SELECT balance FROM wallets WHERE passenger_id = $1`, [passengerId]);
-    if (walletRes.rows.length === 0) {
-      return res.status(404).json({ success: false, message: 'Wallet not found' });
-    }
-    
-    const balance = parseFloat(walletRes.rows[0].balance);
-    const fareAmount = parseFloat(fare);
-
-    if (balance < fareAmount) {
-      return res.status(402).json({ success: false, message: 'Insufficient balance', balance });
+    if (bookingRes.rows.length === 0) {
+       // Not booked early
+       return res.status(404).json({ success: false, message: 'No valid booking found for today' });
     }
 
-    // 4. Deduct Fare
-    const newBalance = balance - fareAmount;
-    await query(`UPDATE wallets SET balance = $1, last_updated = CURRENT_TIMESTAMP WHERE passenger_id = $2`, [newBalance, passengerId]);
+    const booking = bookingRes.rows[0];
 
-    // 5. Log Transaction
-    await query(`
-      INSERT INTO transactions (passenger_id, amount, type, description, balance_after, status, rfid_uid, bus_number)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-    `, [passengerId, fareAmount, 'FARE_DEDUCTION', `Bus Fare (${bus_number})`, newBalance, 'success', uid, bus_number]);
+    // 3. Prevent duplicate boarding
+    if (booking.status === 'boarded') {
+       return res.status(409).json({ success: false, message: 'Already Boarded' });
+    }
 
-    // 6. Update RFID last used
+    if (booking.status !== 'confirmed') {
+       return res.status(400).json({ success: false, message: 'Booking is not confirmed' });
+    }
+
+    // 4. Update status to boarded
+    await query(`UPDATE bookings SET status = 'boarded' WHERE id = $1`, [booking.id]);
+
+    // 5. Update RFID last used
     await query(`UPDATE rfid_cards SET last_used_at = CURRENT_TIMESTAMP WHERE uid = $1`, [uid]);
 
+    // 6. Return success with seat number
     return res.status(200).json({ 
       success: true, 
-      message: 'Fare deducted', 
+      message: 'Boarding Successful', 
       passengerId,
-      deducted: fareAmount, 
-      newBalance 
+      bookingId: booking.booking_id,
+      seatNumber: booking.seat_number || 'TBD'
     });
 
   } catch (error: any) {
