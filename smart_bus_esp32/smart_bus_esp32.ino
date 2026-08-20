@@ -348,6 +348,7 @@ void loop() {
         if      (code == 200) changeState(STATE_RFID_SCANNED_BOOKED);
         else if (code == 409) changeState(STATE_RFID_ALREADY_BOARDED);
         else if (code == 401 || code == 403) changeState(STATE_RFID_INVALID);
+        else if (code == 402) changeState(STATE_LOW_BALANCE);    // Booked but wallet too low
         else if (code == 404) changeState(STATE_RFID_SCANNED_NO_BOOKING);
         else {
           // 500 or network error

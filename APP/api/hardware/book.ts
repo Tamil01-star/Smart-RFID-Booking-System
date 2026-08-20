@@ -23,7 +23,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 1. Lookup bus_id from bus_number
     const busRes = await query(`SELECT id FROM "Bus" WHERE "busNumber" = $1`, [bus_number]);
     if (busRes.rows.length === 0) {
-      return res.status(404).json({ success: false, message: 'Bus not found in database' });
+      return res.status(404).json({ success: false, message: 'Bus not found' });
     }
     const bus_id = busRes.rows[0].id;
 
@@ -44,7 +44,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const passengerId = card.passengerId;
 
     // 3. Check Wallet Balance
-    const walletRes = await query(`SELECT balance FROM "Wallet" WHERE "userId" = $1`, [passengerId]);
+    const walletRes = await query(`SELECT balance FROM "Wallet" WHERE "passengerId" = $1`, [passengerId]);
     if (walletRes.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Wallet not found' });
     }
@@ -58,38 +58,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // 4. Deduct Fare
     const newBalance = balance - fareAmount;
-    await query(`UPDATE "Wallet" SET balance = $1, "updatedAt" = CURRENT_TIMESTAMP WHERE "userId" = $2`, [newBalance, passengerId]);
+    await query(`UPDATE "Wallet" SET balance = $1, "updatedAt" = CURRENT_TIMESTAMP WHERE "passengerId" = $2`, [newBalance, passengerId]);
 
     // 5. Log Transaction
-    await query(`
-      INSERT INTO "WalletTransaction" ("walletId", amount, type, description, status)
-      VALUES ((SELECT id FROM "Wallet" WHERE "userId" = $1), $2, $3, $4, $5)
-    `, [passengerId, fareAmount, 'DEBIT', `Walk-in Bus Fare (${bus_number})`, 'COMPLETED']);
+    const walletTxCols = await query(
+      `SELECT column_name FROM information_schema.columns WHERE table_name='WalletTransaction'`
+    );
+    const colNames = walletTxCols.rows.map((r: any) => r.column_name);
+
+    if (colNames.includes('passengerId') && colNames.includes('amount') && colNames.includes('type')) {
+      await query(
+        `INSERT INTO "WalletTransaction" ("passengerId", amount, type, description, "createdAt")
+         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)`,
+        [passengerId, fareAmount, 'DEBIT', `Walk-in Bus Fare (${bus_number})`]
+      );
+    }
 
     // 6. Create Booking (Automatically Marked as Boarded)
     const booking_id = 'W' + Date.now().toString().slice(-6); // Simple random Walk-in ID
-    const seat_number = 'W' + Math.floor(Math.random() * 40 + 1); // Random seat 1-40
 
+    // Insert according to actual Booking columns: passengerId, busId, travelDate, fare, status, destination
     await query(`
-      INSERT INTO "Booking" ("bookingId", "passengerId", "busId", "travelDate", "seatNumber", "totalAmount", status)
-      VALUES ($1, $2, $3, CURRENT_DATE, $4, $5, 'boarded')
-    `, [booking_id, passengerId, bus_id, seat_number, fareAmount]);
+      INSERT INTO "Booking" ("bookingId", "passengerId", "busId", "travelDate", fare, status, destination)
+      VALUES ($1, $2, $3, CURRENT_DATE, $4, 'boarded', 'Walk-in Destination')
+    `, [booking_id, passengerId, bus_id, fareAmount]);
 
     // 7. Update RFID last used
-    await query(`UPDATE "RFIDCard" SET "lastUsedAt" = CURRENT_TIMESTAMP WHERE uid = $1`, [uid]);
+    await query(`UPDATE "RFIDCard" SET "lastUsedAt" = CURRENT_TIMESTAMP WHERE UPPER(uid) = $1`, [cleanUID]);
 
     return res.status(200).json({ 
       success: true, 
       message: 'Walk-in Booking Successful', 
       passengerId,
       bookingId: booking_id,
-      seatNumber: seat_number,
+      seatNumber: 'OK',
       deducted: fareAmount, 
       newBalance 
     });
 
   } catch (error: any) {
     console.error('Walk-in Book Error:', error);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    res.status(500).json({ success: false, error: 'Internal server error', detail: error.message });
   }
 }

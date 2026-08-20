@@ -35,6 +35,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       [cleanUID]
     );
     if (cardRes.rows.length === 0) {
+      // Card not registered in the system at all
       return res.status(401).json({ success: false, message: 'Card not registered' });
     }
 
@@ -45,15 +46,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const passengerId = card.passengerId;
 
-    // 3. Check for an existing valid booking for this passenger on this bus today
+    // 3. Check for a valid booking for today on this bus
     const bookingRes = await query(`
-      SELECT id, "bookingId", destination, status
+      SELECT id, "bookingId", destination, fare, status
       FROM "Booking"
       WHERE "passengerId" = $1 AND "busId" = $2 AND DATE("travelDate") >= CURRENT_DATE
       ORDER BY id DESC LIMIT 1
     `, [passengerId, bus_id]);
 
     if (bookingRes.rows.length === 0) {
+      // Registered card, but no ticket booked for today
       return res.status(404).json({ success: false, message: 'No valid booking found for today' });
     }
 
@@ -68,19 +70,77 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ success: false, message: 'Booking not confirmed' });
     }
 
-    // 5. Mark as boarded
+    // =====================================================
+    // 5. DEDUCT WALLET - Fare is only deducted HERE when
+    //    the passenger physically taps their RFID card.
+    //    Online booking only reserves the seat (confirmed),
+    //    payment happens at the device gate.
+    // =====================================================
+    const fareAmount = parseFloat(booking.fare) || 0;
+
+    if (fareAmount > 0) {
+      // Check current wallet balance
+      const walletRes = await query(
+        `SELECT balance FROM "Wallet" WHERE "passengerId" = $1`,
+        [passengerId]
+      );
+
+      if (walletRes.rows.length === 0) {
+        return res.status(402).json({ success: false, message: 'Wallet not found. Please top up.' });
+      }
+
+      const currentBalance = parseFloat(walletRes.rows[0].balance);
+
+      if (currentBalance < fareAmount) {
+        // Not enough balance - inform the ESP32 (402 = Payment Required)
+        return res.status(402).json({
+          success: false,
+          message: 'Not a valid balance',
+          balance: currentBalance,
+          required: fareAmount
+        });
+      }
+
+      // Deduct fare from wallet
+      const newBalance = currentBalance - fareAmount;
+      await query(
+        `UPDATE "Wallet" SET balance = $1, "updatedAt" = CURRENT_TIMESTAMP WHERE "passengerId" = $2`,
+        [newBalance, passengerId]
+      );
+
+      // Log transaction in WalletTransaction
+      const walletTxCols = await query(
+        `SELECT column_name FROM information_schema.columns WHERE table_name='WalletTransaction'`
+      );
+      const colNames = walletTxCols.rows.map((r: any) => r.column_name);
+
+      // Build insert based on actual columns present
+      if (colNames.includes('passengerId') && colNames.includes('amount') && colNames.includes('type')) {
+        await query(
+          `INSERT INTO "WalletTransaction" ("passengerId", amount, type, description, "createdAt")
+           VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)`,
+          [passengerId, fareAmount, 'DEBIT', `Bus Fare - ${bus_number} to ${booking.destination}`]
+        );
+      }
+    }
+
+    // 6. Mark booking as boarded
     await query(`UPDATE "Booking" SET status = 'boarded' WHERE id = $1`, [booking.id]);
 
-    // 6. Update RFID last used timestamp
-    await query(`UPDATE "RFIDCard" SET "lastUsedAt" = CURRENT_TIMESTAMP WHERE UPPER(uid) = $1`, [cleanUID]);
+    // 7. Update RFID last used timestamp
+    await query(
+      `UPDATE "RFIDCard" SET "lastUsedAt" = CURRENT_TIMESTAMP WHERE UPPER(uid) = $1`,
+      [cleanUID]
+    );
 
-    // 7. Return success — use destination as the "seat" info for the LCD
+    // 8. Return success with destination as display info
     return res.status(200).json({
       success: true,
       message: 'Boarding Successful',
       passengerId,
       bookingId: booking.bookingId,
-      seatNumber: booking.destination || 'OK' // LCD will show destination city
+      seatNumber: booking.destination || 'OK', // LCD shows destination city
+      fareDeducted: fareAmount
     });
 
   } catch (error: any) {
