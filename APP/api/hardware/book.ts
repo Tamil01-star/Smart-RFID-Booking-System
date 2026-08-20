@@ -1,6 +1,11 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { query } from '../utils/db.js';
 
+// Helper: strip colons from UID sent by ESP32
+function normalizeUID(uid: string): string {
+  return uid.replace(/:/g, '').toUpperCase();
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -12,6 +17,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'Missing uid, bus_number, or fare' });
   }
 
+  const cleanUID = normalizeUID(uid);
+
   try {
     // 1. Lookup bus_id from bus_number
     const busRes = await query(`SELECT id FROM "Bus" WHERE "busNumber" = $1`, [bus_number]);
@@ -20,8 +27,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     const bus_id = busRes.rows[0].id;
 
-    // 2. Check if RFID exists and is linked
-    const cardRes = await query(`SELECT "passengerId", status FROM "RFIDCard" WHERE uid = $1`, [uid]);
+    // 2. Check if RFID card exists and is active
+    const cardRes = await query(
+      `SELECT "passengerId", status FROM "RFIDCard" WHERE UPPER(uid) = $1`,
+      [cleanUID]
+    );
     if (cardRes.rows.length === 0) {
       return res.status(401).json({ success: false, message: 'Card not registered' });
     }

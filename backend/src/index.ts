@@ -651,6 +651,33 @@ app.post('/api/bookings/create', async (req, res) => {
 
     await logEvent('success', `Booking ${bookingId} confirmed for ${passengerName} (${bookingSource} → ${bookingDestination})`, 'Booking Service');
 
+    // Send Booking Confirmation Email
+    try {
+      const user = await prisma.user.findFirst({ where: { passengerId } });
+      if (user && user.email) {
+        await sendEmail(
+          user.email,
+          'SMARTBUS+ Booking Confirmation',
+          `Your booking ${bookingId} has been confirmed.\n\nTicket Details:\nBus: ${bus.busNumber} (${bus.busName})\nRoute: ${bookingSource} to ${bookingDestination}\nDate: ${travelDate}\nTime: ${bus.departureTime} - ${bus.arrivalTime}\nFare: INR ${bookingFare}`,
+          `<h3>SMARTBUS+ Booking Confirmation</h3>
+           <p>Hello <b>${passengerName}</b>,</p>
+           <p>Your bus booking is confirmed!</p>
+           <table style="width:100%; border-collapse: collapse; border: 1px solid #ddd; max-width: 500px; font-family: sans-serif;">
+             <tr style="background-color: #f2f2f2;"><th style="padding: 8px; text-align: left;" colspan="2">Ticket Details</th></tr>
+             <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><b>Booking ID:</b></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${bookingId}</td></tr>
+             <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><b>Bus:</b></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${bus.busNumber} (${bus.busName})</td></tr>
+             <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><b>Route:</b></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${bookingSource} &rarr; ${bookingDestination}</td></tr>
+             <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><b>Travel Date:</b></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${travelDate}</td></tr>
+             <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><b>Timing:</b></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${bus.departureTime} - ${bus.arrivalTime}</td></tr>
+             <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><b>Fare Paid:</b></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">INR ${bookingFare}</td></tr>
+           </table>
+           <p>Thank you for choosing SMARTBUS+!</p>`
+        );
+      }
+    } catch (emailErr) {
+      console.error('Failed to send booking confirmation email:', emailErr);
+    }
+
     res.json({ success: true, booking });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
