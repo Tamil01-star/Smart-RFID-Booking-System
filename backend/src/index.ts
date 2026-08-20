@@ -607,27 +607,11 @@ app.post('/api/bookings/create', async (req, res) => {
       return res.status(400).json({ error: 'Insufficient wallet balance' });
     }
 
-    const balanceBefore = wallet.balance;
-    const balanceAfter = balanceBefore - bookingFare;
-
-    // Deduct fare & update seats
-    await prisma.$transaction([
-      prisma.wallet.update({ where: { passengerId }, data: { balance: balanceAfter } }),
-      prisma.bus.update({ where: { id: busId }, data: { availableSeats: bus.availableSeats - 1 } }),
-      prisma.walletTransaction.create({
-        data: {
-          passengerId,
-          type: 'FARE_DEDUCTION',
-          amount: bookingFare,
-          description: `Bus fare ticket booking (${bookingSource} → ${bookingDestination}) - ${bus.busNumber}`,
-          balanceBefore,
-          balanceAfter,
-          status: 'success',
-          busNumber: bus.busNumber,
-          rfidUid
-        }
-      })
-    ]);
+    // Update seats (fare is deducted only when scanning card on bus)
+    await prisma.bus.update({ 
+      where: { id: busId }, 
+      data: { availableSeats: bus.availableSeats - 1 } 
+    });
 
     const bookingId = `SBBK${Math.floor(10000000 + Math.random() * 90000000)}`;
     const booking = await prisma.booking.create({
@@ -658,7 +642,7 @@ app.post('/api/bookings/create', async (req, res) => {
         await sendEmail(
           user.email,
           'SMARTBUS+ Booking Confirmation',
-          `Your booking ${bookingId} has been confirmed.\n\nTicket Details:\nBus: ${bus.busNumber} (${bus.busName})\nRoute: ${bookingSource} to ${bookingDestination}\nDate: ${travelDate}\nTime: ${bus.departureTime} - ${bus.arrivalTime}\nFare: INR ${bookingFare}`,
+          `Your booking ${bookingId} has been confirmed.\n\nTicket Details:\nBus: ${bus.busNumber} (${bus.busName})\nRoute: ${bookingSource} to ${bookingDestination}\nDate: ${travelDate}\nTime: ${bus.departureTime} - ${bus.arrivalTime}\nFare (to be deducted at boarding): INR ${bookingFare}`,
           `<h3>SMARTBUS+ Booking Confirmation</h3>
            <p>Hello <b>${passengerName}</b>,</p>
            <p>Your bus booking is confirmed!</p>
@@ -669,7 +653,7 @@ app.post('/api/bookings/create', async (req, res) => {
              <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><b>Route:</b></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${bookingSource} &rarr; ${bookingDestination}</td></tr>
              <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><b>Travel Date:</b></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${travelDate}</td></tr>
              <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><b>Timing:</b></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${bus.departureTime} - ${bus.arrivalTime}</td></tr>
-             <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><b>Fare Paid:</b></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">INR ${bookingFare}</td></tr>
+             <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><b>Fare to Deduct:</b></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">INR ${bookingFare} (on boarding tap)</td></tr>
            </table>
            <p>Thank you for choosing SMARTBUS+!</p>`
         );
