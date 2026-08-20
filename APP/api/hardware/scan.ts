@@ -46,11 +46,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const passengerId = card.passengerId;
 
     // 3. Check for an existing valid booking for this passenger on this bus today
-    // Booking table uses: passengerId, busId, travelDate, status, destination (no seatNumber column)
     const bookingRes = await query(`
       SELECT id, "bookingId", destination, status
       FROM "Booking"
-      WHERE "passengerId" = $1 AND "busId" = $2 AND "travelDate" >= CURRENT_DATE
+      WHERE "passengerId" = $1 AND "busId" = $2 AND DATE("travelDate") >= CURRENT_DATE
       ORDER BY id DESC LIMIT 1
     `, [passengerId, bus_id]);
 
