@@ -48,6 +48,38 @@ const createTransporter = async () => {
 };
 
 const sendEmail = async (to: string, subject: string, text: string, html: string) => {
+  // Try Resend API first if configured
+  if (process.env.RESEND_API_KEY) {
+    try {
+      console.log('🔄 Sending email via Resend API to', to, '...');
+      const fromEmail = process.env.RESEND_FROM || 'onboarding@resend.dev';
+      const res = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          from: `SMARTBUS+ <${fromEmail}>`,
+          to: [to],
+          subject,
+          text,
+          html
+        })
+      });
+      const data = (await res.json()) as any;
+      if (res.ok) {
+        console.log('✅ Email sent via Resend. ID:', data.id);
+        return true;
+      } else {
+        console.error('❌ Resend API returned error:', data);
+      }
+    } catch (err) {
+      console.error('❌ Failed to send email via Resend:', err);
+    }
+  }
+
+  // Fallback to SMTP
   const transporter = await createTransporter();
   const from = process.env.SMTP_FROM || 'noreply@smartbus.com';
   
