@@ -278,6 +278,9 @@ app.post('/api/auth/send-otp', async (req, res) => {
       }
     });
 
+    // Log OTP to database logs for fallback verification
+    await logEvent('info', `OTP code generated for ${email}: ${code}`, 'Auth Service');
+
     // Send email
     await sendEmail(
       email,

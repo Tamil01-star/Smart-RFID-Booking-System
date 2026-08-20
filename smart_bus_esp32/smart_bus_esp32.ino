@@ -115,9 +115,8 @@ void buzzerNotBooked() {
 
 void buzzerInvalidLong() {
   // 1 long sound for Not Registered / Invalid
+  // We just turn it on. The state machine will turn it off after 2000ms.
   digitalWrite(BUZZER_PIN, HIGH);
-  delay(2000); // 2 second long beep
-  digitalWrite(BUZZER_PIN, LOW);
 }
 
 void buzzerInvalid() {
@@ -398,8 +397,10 @@ void loop() {
         } else if (responseCode < 0 || responseCode == 500) {
            showLCD("API Error " + String(responseCode), "Check Vercel");
            redLED(true);
-           buzzerInvalidLong();
-           delay(3000);
+           digitalWrite(BUZZER_PIN, HIGH);
+           delay(2000);
+           digitalWrite(BUZZER_PIN, LOW);
+           delay(1000);
            redLED(false);
            changeState(STATE_STANDBY);
         } else {
@@ -418,6 +419,7 @@ void loop() {
         stateJustChanged = false;
       }
       if (elapsedTime >= 2000) {
+        digitalWrite(BUZZER_PIN, LOW); // Turn off long beep
         redLED(false);
         changeState(STATE_STANDBY); 
       }
@@ -664,10 +666,11 @@ void loop() {
       if (stateJustChanged) {
         showLCD("Not a valid", "balance!");
         redLED(true);
-        buzzerInvalidLong(); // 2 sec long red signal
+        buzzerInvalidLong(); // Turn on buzzer
         stateJustChanged = false;
       }
       if (elapsedTime >= 2000) {
+        digitalWrite(BUZZER_PIN, LOW); // Turn off buzzer
         redLED(false);
         changeState(STATE_STANDBY);
       }
