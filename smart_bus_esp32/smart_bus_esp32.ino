@@ -391,12 +391,18 @@ void loop() {
            changeState(STATE_RFID_SCANNED_BOOKED);
         } else if (responseCode == 409) {
            changeState(STATE_RFID_ALREADY_BOARDED);
-        } else if (responseCode == 401) {
+        } else if (responseCode == 401 || responseCode == 403) {
            changeState(STATE_RFID_INVALID);
         } else if (responseCode == 404) {
            changeState(STATE_RFID_SCANNED_NO_BOOKING);
+        } else if (responseCode < 0 || responseCode == 500) {
+           showLCD("API Error " + String(responseCode), "Check Vercel");
+           redLED(true);
+           buzzerInvalidLong();
+           delay(3000);
+           redLED(false);
+           changeState(STATE_STANDBY);
         } else {
-           // Network Error, 400, 403, 500 etc. Treat as invalid/not booked.
            changeState(STATE_RFID_SCANNED_NO_BOOKING);
         }
         stateJustChanged = false;
@@ -406,7 +412,7 @@ void loop() {
     // ----------------------------------------------------
     case STATE_RFID_INVALID:
       if (stateJustChanged) {
-        showLCD("Card Invalid", "Not Registered!");
+        showLCD("ID:" + lastScannedUID, "Not Registered");
         redLED(true);
         buzzerInvalidLong();
         stateJustChanged = false;
@@ -613,7 +619,7 @@ void loop() {
             changeState(STATE_SUCCESS);
          } else if (responseCode == 402) {
             changeState(STATE_LOW_BALANCE);
-         } else if (responseCode == 401) {
+         } else if (responseCode == 401 || responseCode == 403) {
             changeState(STATE_RFID_INVALID);
          } else {
             showLCD("Payment Error", "Try Again");

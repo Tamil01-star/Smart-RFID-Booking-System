@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Bus, Mail, KeyRound, Lock, CheckCircle, ArrowRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+import { API_URL } from '../../config';
 
 export default function ForgotPassword() {
   const navigate = useNavigate();
