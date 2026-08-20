@@ -61,27 +61,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     await query(`UPDATE "Wallet" SET balance = $1, "updatedAt" = CURRENT_TIMESTAMP WHERE "passengerId" = $2`, [newBalance, passengerId]);
 
     // 5. Log Transaction
-    const walletTxCols = await query(
-      `SELECT column_name FROM information_schema.columns WHERE table_name='WalletTransaction'`
+    const tx_id = 'TX' + Date.now().toString().slice(-8);
+    await query(
+      `INSERT INTO "WalletTransaction" (id, "passengerId", amount, type, description, status, "balanceBefore", "balanceAfter", "busNumber", timestamp)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)`,
+      [tx_id, passengerId, fareAmount, 'DEBIT', `Walk-in Bus Fare (${bus_number})`, 'COMPLETED', balance, newBalance, bus_number]
     );
-    const colNames = walletTxCols.rows.map((r: any) => r.column_name);
-
-    if (colNames.includes('passengerId') && colNames.includes('amount') && colNames.includes('type')) {
-      await query(
-        `INSERT INTO "WalletTransaction" ("passengerId", amount, type, description, "createdAt")
-         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)`,
-        [passengerId, fareAmount, 'DEBIT', `Walk-in Bus Fare (${bus_number})`]
-      );
-    }
 
     // 6. Create Booking (Automatically Marked as Boarded)
-    const booking_id = 'W' + Date.now().toString().slice(-6); // Simple random Walk-in ID
+    const booking_id = 'W' + Date.now().toString().slice(-6);
+    const b_id = 'B' + Date.now().toString();
 
-    // Insert according to actual Booking columns: passengerId, busId, travelDate, fare, status, destination
     await query(`
-      INSERT INTO "Booking" ("bookingId", "passengerId", "busId", "travelDate", fare, status, destination)
-      VALUES ($1, $2, $3, CURRENT_DATE, $4, 'boarded', 'Walk-in Destination')
-    `, [booking_id, passengerId, bus_id, fareAmount]);
+      INSERT INTO "Booking" (
+        id, "bookingId", "passengerId", "passengerName", "busId", "busNumber", 
+        source, destination, "travelDate", "departureTime", "arrivalTime", 
+        fare, status, "rfidLinked", "createdAt"
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_DATE, $9, $10, $11, 'boarded', true, CURRENT_TIMESTAMP)
+    `, [
+      b_id, booking_id, passengerId, 'Walk-in Passenger', bus_id, bus_number, 
+      'Current Stop', 'Walk-in Dest', '00:00', '23:59', fareAmount
+    ]);
 
     // 7. Update RFID last used
     await query(`UPDATE "RFIDCard" SET "lastUsedAt" = CURRENT_TIMESTAMP WHERE UPPER(uid) = $1`, [cleanUID]);

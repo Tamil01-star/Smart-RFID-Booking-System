@@ -109,19 +109,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       );
 
       // Log transaction in WalletTransaction
-      const walletTxCols = await query(
-        `SELECT column_name FROM information_schema.columns WHERE table_name='WalletTransaction'`
+      const tx_id = 'TX' + Date.now().toString().slice(-8);
+      await query(
+        `INSERT INTO "WalletTransaction" (id, "passengerId", amount, type, description, status, "balanceBefore", "balanceAfter", "busNumber", timestamp)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)`,
+        [tx_id, passengerId, fareAmount, 'DEBIT', `Bus Fare - ${bus_number} to ${booking.destination}`, 'COMPLETED', currentBalance, newBalance, bus_number]
       );
-      const colNames = walletTxCols.rows.map((r: any) => r.column_name);
-
-      // Build insert based on actual columns present
-      if (colNames.includes('passengerId') && colNames.includes('amount') && colNames.includes('type')) {
-        await query(
-          `INSERT INTO "WalletTransaction" ("passengerId", amount, type, description, "createdAt")
-           VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)`,
-          [passengerId, fareAmount, 'DEBIT', `Bus Fare - ${bus_number} to ${booking.destination}`]
-        );
-      }
     }
 
     // 6. Mark booking as boarded

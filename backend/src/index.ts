@@ -1100,3 +1100,5 @@ app.listen(PORT, async () => {
     console.error('⚠️ Auto-seed failed:', err);
   }
 });
+
+export default app;
