@@ -6,6 +6,19 @@ function normalizeUID(uid: string): string {
   return uid.replace(/:/g, '').toUpperCase();
 }
 
+// Helper: Generate a seat number deterministically from booking ID
+// Produces seats like A01, B05 ... D10 (40 seats total)
+function allocateSeat(bookingId: string): string {
+  let hash = 0;
+  for (let i = 0; i < bookingId.length; i++) {
+    hash = (hash * 31 + bookingId.charCodeAt(i)) & 0xffff;
+  }
+  const seatNum = (hash % 40) + 1;
+  const row     = String.fromCharCode(65 + Math.floor((seatNum - 1) / 10)); // A, B, C, D
+  const col     = ((seatNum - 1) % 10) + 1;
+  return `${row}${col.toString().padStart(2, '0')}`;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -87,12 +100,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 7. Update RFID last used
     await query(`UPDATE "RFIDCard" SET "lastUsedAt" = CURRENT_TIMESTAMP WHERE UPPER(uid) = $1`, [cleanUID]);
 
+    // 8. Allocate a seat number from the booking ID
+    const seatNumber = allocateSeat(booking_id);
+
+    // 9. Send Email Ticket (Trigger Backend API)
+    try {
+      const userRes = await query(`SELECT email, name FROM "User" WHERE "passengerId" = $1`, [passengerId]);
+      if (userRes.rows.length > 0 && userRes.rows[0].email) {
+        const userEmail = userRes.rows[0].email;
+        const userName = userRes.rows[0].name;
+        
+        // Ensure Vercel knows the backend URL
+        const backendUrl = process.env.VITE_API_URL || 'https://backend-sigma-beige-36.vercel.app/api';
+        
+        await fetch(`${backendUrl}/bookings/send-ticket`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: userEmail,
+            name: userName,
+            bookingId: booking_id,
+            busNumber: bus_number,
+            route: 'Walk-in Boarding',
+            fare: fareAmount
+          })
+        });
+      }
+    } catch (emailErr) {
+      console.error('Walk-in Email Trigger Error:', emailErr);
+    }
+
     return res.status(200).json({ 
       success: true, 
       message: 'Walk-in Booking Successful', 
       passengerId,
       bookingId: booking_id,
-      seatNumber: 'OK',
+      seatNumber,
       deducted: fareAmount, 
       newBalance 
     });

@@ -1,7 +1,7 @@
 // ==========================================
 // SMART BUS BOOKING SYSTEM - ESP32 FIRMWARE
 // Bus: NS893 | Route: Salem -> Thiruvananthapuram
-// GPS-Ready Architecture
+// IR Sensor Integration
 // ==========================================
 
 #include <WiFi.h>
@@ -30,9 +30,18 @@ const char* HARDCODED_BUS_NUMBER = "NS893";
 #define GREEN_LED_PIN  4
 #define RED_LED_PIN    2
 #define BUZZER_PIN     15
-// GPS Pins (RESERVED FOR FUTURE USE)
-#define GPS_TX_PIN     16
-#define GPS_RX_PIN     34
+
+// ==========================================
+// IR PROXIMITY SENSOR CONFIGURATION
+// GPIO 35: input-only pin, conflicts with nothing.
+// Wire: IR OUT -> GPIO 35 | VCC -> 3.3V | GND -> GND
+// If YOUR module outputs HIGH on detect, change IR_ACTIVE_STATE to HIGH.
+// ==========================================
+#define IR_SENSOR_PIN                35
+const bool          IR_ACTIVE_STATE       = LOW;   // LOW = object detected (most common)
+const unsigned long IR_ALARM_DURATION     = 3000;  // ms alarm stays ON for unauthorized entry
+const unsigned long IR_DEBOUNCE_MS        = 100;   // debounce window in ms
+const unsigned long AUTHORIZATION_TIMEOUT = 30000; // 30s for passenger to physically enter
 
 // ==========================================
 // KEYPAD CONFIGURATION
@@ -67,14 +76,14 @@ enum BusType { ORDINARY = 0, EXPRESS = 1 };
 BusType currentBusType = EXPRESS;
 
 // ==========================================
-// STATE MACHINE DEFINITION
+// MAIN STATE MACHINE DEFINITION
 // ==========================================
 enum SystemState {
   STATE_STANDBY,
   STATE_VERIFYING_RFID_API,
   STATE_RFID_SCANNED_BOOKED,
   STATE_RFID_SCANNED_NO_BOOKING,
-  STATE_RFID_INVALID,             // Card NOT in DB -> RED LED + long buzz + "Not Registered"
+  STATE_RFID_INVALID,
   STATE_RFID_ALREADY_BOARDED,
   STATE_WALKIN_PROMPT,
   STATE_SELECT_DEST,
@@ -87,41 +96,54 @@ enum SystemState {
   STATE_TIMEOUT
 };
 
-SystemState currentState = STATE_STANDBY;
+SystemState currentState  = STATE_STANDBY;
 unsigned long stateEnteredAt = 0;
-bool stateJustChanged = true;
+bool stateJustChanged     = true;
 
 // ==========================================
 // GLOBAL VARIABLES
 // ==========================================
-WiFiClientSecure secureClient; // Global to prevent stack overflow
+WiFiClientSecure secureClient;
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 MFRC522 rfid(RFID_SS_PIN, RFID_RST_PIN);
 Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
 
-String lastScannedUID    = "";
-String assignedSeat      = "TBD";
-int    currentBoardingIndex = 0; // Default: Salem (index 0). GPS will set this later.
+String lastScannedUID       = "";
+String assignedSeat         = "TBD";
+int    currentBoardingIndex = 0;
 int    currentDestIndex     = 8;
 int    ticketCount          = 1;
-int    walletBalance        = 0; // Updated from database after payment
+int    walletBalance        = 0;
+
+// ==========================================
+// IR SENSOR STATE VARIABLES
+// ==========================================
+// Set to true when RFID authorizes a passenger; IR uses this to allow entry.
+bool          irPassengerAuthorized = false;
+unsigned long irAuthGrantedAt       = 0;
+
+// IR sub-state machine (runs alongside main state machine)
+enum IRState { IR_WAITING, IR_PERSON_DETECTED, IR_ALARM_ACTIVE };
+IRState       irState           = IR_WAITING;
+bool          irLastSensorState = true;  // init = "no person" (not active)
+unsigned long irDebounceTime    = 0;
+unsigned long irAlarmStart      = 0;
 
 // ==========================================
 // HELPER: STATE CHANGER
 // ==========================================
 void changeState(SystemState newState) {
-  currentState      = newState;
-  stateEnteredAt    = millis();
-  stateJustChanged  = true;
+  currentState     = newState;
+  stateEnteredAt   = millis();
+  stateJustChanged = true;
 }
 
 // ==========================================
-// HELPER: LCD PRINT (clears before printing)
+// HELPER: LCD PRINT
 // ==========================================
 void showLCD(String row1, String row2) {
   lcd.clear();
   lcd.setCursor(0, 0);
-  // Pad to 16 chars to clear leftover chars
   while (row1.length() < 16) row1 += ' ';
   lcd.print(row1.substring(0, 16));
   lcd.setCursor(0, 1);
@@ -139,19 +161,16 @@ void redLED(bool on)   { digitalWrite(RED_LED_PIN,   on ? HIGH : LOW); }
 // BUZZER PATTERNS
 // ==========================================
 void buzzerCardRead() {
-  // Instant 100ms chirp on card tap
   greenLED(true);
   digitalWrite(BUZZER_PIN, HIGH); delay(100); digitalWrite(BUZZER_PIN, LOW);
   greenLED(false);
 }
 
 void buzzerValid() {
-  // 1 short beep - Success
   digitalWrite(BUZZER_PIN, HIGH); delay(300); digitalWrite(BUZZER_PIN, LOW);
 }
 
 void buzzerNotBooked() {
-  // 2 short beeps - Not booked
   for (int i = 0; i < 2; i++) {
     digitalWrite(BUZZER_PIN, HIGH); delay(250); digitalWrite(BUZZER_PIN, LOW);
     if (i == 0) delay(200);
@@ -159,7 +178,6 @@ void buzzerNotBooked() {
 }
 
 void buzzerInvalidShort() {
-  // 3 short beeps - Duplicate scan
   for (int i = 0; i < 3; i++) {
     digitalWrite(BUZZER_PIN, HIGH); delay(150); digitalWrite(BUZZER_PIN, LOW);
     if (i < 2) delay(150);
@@ -167,12 +185,10 @@ void buzzerInvalidShort() {
 }
 
 void buzzerKeyClick() {
-  // Very short click on keypad press
   digitalWrite(BUZZER_PIN, HIGH); delay(40); digitalWrite(BUZZER_PIN, LOW);
 }
 
-// NOTE: buzzerInvalidLong just turns buzzer ON.
-// The state machine will turn it OFF after 2000ms (non-blocking).
+// buzzerInvalidLong just turns buzzer ON — state machine turns it OFF after 2000ms
 void buzzerInvalidLong() {
   digitalWrite(BUZZER_PIN, HIGH);
 }
@@ -197,12 +213,12 @@ bool readRFID(String &outUID) {
 
 // ==========================================
 // API: CHECK BOOKING (scan endpoint)
-// Returns HTTP status code. 401 = not registered.
 // ==========================================
 int checkBooking(String uid, String &outSeat) {
   if (WiFi.status() != WL_CONNECTED) return -1;
   HTTPClient http;
   http.begin(secureClient, apiEndpoint);
+  http.setTimeout(10000);                   // 10s timeout — handles Vercel cold starts
   http.addHeader("Content-Type", "application/json");
   String body = "{\"uid\":\"" + uid + "\",\"bus_number\":\"" + String(HARDCODED_BUS_NUMBER) + "\"}";
   int code = http.POST(body);
@@ -220,12 +236,12 @@ int checkBooking(String uid, String &outSeat) {
 
 // ==========================================
 // API: PROCESS PAYMENT (book endpoint)
-// Returns HTTP status code. 402 = low balance. 401 = not registered.
 // ==========================================
 int processPayment(String uid, int fareAmount, String &outSeat, int &outBalance) {
   if (WiFi.status() != WL_CONNECTED) return -1;
   HTTPClient http;
   http.begin(secureClient, bookEndpoint);
+  http.setTimeout(10000);                   // 10s timeout — handles Vercel cold starts
   http.addHeader("Content-Type", "application/json");
   String body = "{\"uid\":\"" + uid + "\",\"bus_number\":\"" + String(HARDCODED_BUS_NUMBER) + "\",\"fare\":" + String(fareAmount) + "}";
   int code = http.POST(body);
@@ -249,17 +265,95 @@ int calculateFare(int fromIdx, int toIdx, BusType type) {
   int dist = cumulativeDist[toIdx] - cumulativeDist[fromIdx];
   int ratePerKm = (type == EXPRESS) ? 2 : 1;
   int fare = dist * ratePerKm;
-  // Round to nearest 5
   return ((fare + 4) / 5) * 5;
 }
 
 // ==========================================
-// GPS PLACEHOLDER (for future integration)
+// IR SENSOR HANDLER  (non-blocking, called every loop)
+// 
+// State diagram:
+//   IR_WAITING
+//     -> person detected -> check irPassengerAuthorized
+//        YES -> log boarding, clear auth, stay in IR_PERSON_DETECTED (wait for leave)
+//        NO  -> alarm (RED LED + BUZZER + LCD), go to IR_ALARM_ACTIVE
+//   IR_PERSON_DETECTED
+//     -> person leaves -> IR_WAITING
+//   IR_ALARM_ACTIVE
+//     -> after IR_ALARM_DURATION -> turn off alarm, restore LCD, go to IR_PERSON_DETECTED
 // ==========================================
-int getGPSBoardingIndex() {
-  // TODO: When GPS is added, read GPS coordinates and return matching stop index.
-  // For now, always return 0 (Salem).
-  return 0;
+void handleIRSensor() {
+  bool          rawReading = (digitalRead(IR_SENSOR_PIN) == IR_ACTIVE_STATE);
+  unsigned long now        = millis();
+
+  // Authorization timeout: revoke if passenger didn't enter in time
+  if (irPassengerAuthorized && (now - irAuthGrantedAt >= AUTHORIZATION_TIMEOUT)) {
+    irPassengerAuthorized = false;
+    Serial.println("[IR] Authorization window expired (30s timeout)");
+  }
+
+  switch (irState) {
+
+    // -------------------------------------------------------
+    case IR_WAITING:
+      if (rawReading != irLastSensorState) {
+        irDebounceTime    = now;
+        irLastSensorState = rawReading;
+      }
+      if (rawReading && (now - irDebounceTime >= IR_DEBOUNCE_MS)) {
+        // Stable detection — ONE entry event generated
+        irState = IR_PERSON_DETECTED;
+        Serial.println("[IR] Person detected");
+
+        if (irPassengerAuthorized) {
+          // CASE 1 — AUTHORIZED: passenger physically entering after valid RFID
+          irPassengerAuthorized = false; // consumed
+          Serial.println("[IR] Authorized passenger detected entering");
+          Serial.println("[BOARDING] Passenger boarded successfully");
+          // Green LED & success display already handled by main state machine — no alarm
+        } else {
+          // CASE 2 — UNAUTHORIZED: no valid RFID session active
+          Serial.println("[IR] UNAUTHORIZED entry detected!");
+          Serial.println("[SECURITY] No valid authorization present");
+          Serial.println("[ALERT] Red LED ON");
+          Serial.println("[ALERT] Long buzzer activated");
+          irState      = IR_ALARM_ACTIVE;
+          irAlarmStart = now;
+          redLED(true);
+          greenLED(false);
+          digitalWrite(BUZZER_PIN, HIGH);
+          showLCD("UNAUTHORIZED", "ENTRY ALERT!");
+        }
+      }
+      break;
+
+    // -------------------------------------------------------
+    case IR_PERSON_DETECTED:
+      // Wait for the person to clear the sensor before allowing next detection
+      if (rawReading != irLastSensorState) {
+        irDebounceTime    = now;
+        irLastSensorState = rawReading;
+      }
+      if (!rawReading && (now - irDebounceTime >= IR_DEBOUNCE_MS)) {
+        irState = IR_WAITING;
+        Serial.println("[IR] Person left detection zone");
+        Serial.println("[IR] Ready for next passenger");
+      }
+      break;
+
+    // -------------------------------------------------------
+    case IR_ALARM_ACTIVE:
+      // Hold alarm for IR_ALARM_DURATION then clear
+      if (now - irAlarmStart >= IR_ALARM_DURATION) {
+        digitalWrite(BUZZER_PIN, LOW);
+        redLED(false);
+        Serial.println("[ALERT] Alarm cleared. Returning to ready.");
+        if (currentState == STATE_STANDBY) {
+          showLCD("Bus: " + String(HARDCODED_BUS_NUMBER), "Tap Card to Board");
+        }
+        irState = IR_PERSON_DETECTED; // wait for person to leave before next detection
+      }
+      break;
+  }
 }
 
 // ==========================================
@@ -268,13 +362,16 @@ int getGPSBoardingIndex() {
 void setup() {
   Serial.begin(115200);
 
-  // Pin Modes
+  // Existing pin modes
   pinMode(GREEN_LED_PIN, OUTPUT);
   pinMode(RED_LED_PIN,   OUTPUT);
   pinMode(BUZZER_PIN,    OUTPUT);
   digitalWrite(GREEN_LED_PIN, LOW);
   digitalWrite(RED_LED_PIN,   LOW);
   digitalWrite(BUZZER_PIN,    LOW);
+
+  // IR sensor — GPIO 35 is input-only; no pull-up needed (IR module has its own)
+  pinMode(IR_SENSOR_PIN, INPUT);
 
   // LCD Init
   Wire.begin(21, 22);
@@ -289,7 +386,7 @@ void setup() {
   // WiFi Init
   showLCD("Connecting WiFi", ssid);
   WiFi.begin(ssid, password);
-  secureClient.setInsecure(); // Accept self-signed certs
+  secureClient.setInsecure();
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < 20) {
     delay(500); attempts++;
@@ -303,9 +400,7 @@ void setup() {
     delay(2000);
   }
 
-  // GPS placeholder: set boarding index
-  currentBoardingIndex = getGPSBoardingIndex();
-
+  currentBoardingIndex = 0; // Hardcoded to Salem (index 0) for now
   changeState(STATE_STANDBY);
 }
 
@@ -315,6 +410,9 @@ void setup() {
 void loop() {
   char key = keypad.getKey();
   if (key) buzzerKeyClick();
+
+  // IR sensor handler runs every loop — fully non-blocking
+  handleIRSensor();
 
   unsigned long elapsedTime = millis() - stateEnteredAt;
 
@@ -326,7 +424,7 @@ void loop() {
         showLCD("Bus: " + String(HARDCODED_BUS_NUMBER), "Tap Card to Board");
         greenLED(false);
         redLED(false);
-        digitalWrite(BUZZER_PIN, LOW); // Ensure buzzer is off
+        digitalWrite(BUZZER_PIN, LOW);
         stateJustChanged = false;
       }
       if (key == 'A') { ticketCount = 1; changeState(STATE_WALKIN_PROMPT); }
@@ -348,10 +446,9 @@ void loop() {
         if      (code == 200) changeState(STATE_RFID_SCANNED_BOOKED);
         else if (code == 409) changeState(STATE_RFID_ALREADY_BOARDED);
         else if (code == 401 || code == 403) changeState(STATE_RFID_INVALID);
-        else if (code == 402) changeState(STATE_LOW_BALANCE);    // Booked but wallet too low
+        else if (code == 402) changeState(STATE_LOW_BALANCE);
         else if (code == 404) changeState(STATE_RFID_SCANNED_NO_BOOKING);
         else {
-          // 500 or network error
           showLCD("API Err:" + String(code), "Check Vercel");
           redLED(true);
           digitalWrite(BUZZER_PIN, HIGH); delay(2000); digitalWrite(BUZZER_PIN, LOW);
@@ -363,31 +460,34 @@ void loop() {
       break;
 
     // ----------------------------------------
-    // 401 / 403: Card NOT registered in DB
-    // Show "Not Registered" + RED LED + 2-sec long buzzer
+    // 401/403: Card NOT registered
     // ----------------------------------------
     case STATE_RFID_INVALID:
       if (stateJustChanged) {
         showLCD("Not Registered!", "UID:" + lastScannedUID);
         redLED(true);
-        buzzerInvalidLong(); // Turns buzzer ON (non-blocking)
+        buzzerInvalidLong();
         stateJustChanged = false;
       }
       if (elapsedTime >= 2000) {
-        digitalWrite(BUZZER_PIN, LOW); // Turn buzzer OFF after 2 sec
+        digitalWrite(BUZZER_PIN, LOW);
         redLED(false);
         changeState(STATE_STANDBY);
       }
       break;
 
     // ----------------------------------------
-    // 200: Valid booking found - Boarded!
+    // 200: Valid booking — Boarded!
     // ----------------------------------------
     case STATE_RFID_SCANNED_BOOKED:
       if (stateJustChanged) {
         showLCD("Booked! Seat:", assignedSeat);
         greenLED(true);
         buzzerValid();
+        // Grant IR authorization: passenger may now physically enter bus
+        irPassengerAuthorized = true;
+        irAuthGrantedAt       = millis();
+        Serial.println("[IR] Authorization granted for pre-booked passenger");
         stateJustChanged = false;
       }
       if (elapsedTime >= 4000) { greenLED(false); changeState(STATE_STANDBY); }
@@ -407,7 +507,7 @@ void loop() {
       break;
 
     // ----------------------------------------
-    // 404: Registered but no ticket today -> Walk-in manual booking
+    // 404: Registered but no ticket today
     // ----------------------------------------
     case STATE_RFID_SCANNED_NO_BOOKING:
       if (stateJustChanged) {
@@ -426,7 +526,7 @@ void loop() {
     // ----------------------------------------
     case STATE_WALKIN_PROMPT:
       if (stateJustChanged) {
-        currentDestIndex = NUM_STOPS - 1; // Default last stop
+        currentDestIndex = NUM_STOPS - 1;
         showLCD("Select Dest Stop", "1-9 then # to OK");
         stateJustChanged = false;
       }
@@ -457,7 +557,7 @@ void loop() {
       break;
 
     // ----------------------------------------
-    // WALK-IN: Tap card to pay (real DB wallet check)
+    // WALK-IN: Tap card to pay
     // ----------------------------------------
     case STATE_CHECKING_WALLET:
       if (stateJustChanged) {
@@ -472,8 +572,8 @@ void loop() {
         int code = processPayment(lastScannedUID, fare, assignedSeat, walletBalance);
         Serial.print("Payment API code: "); Serial.println(code);
 
-        if      (code == 200)             changeState(STATE_SUCCESS);
-        else if (code == 402)             changeState(STATE_LOW_BALANCE);
+        if      (code == 200)                changeState(STATE_SUCCESS);
+        else if (code == 402)                changeState(STATE_LOW_BALANCE);
         else if (code == 401 || code == 403) changeState(STATE_RFID_INVALID);
         else {
           showLCD("Pay Error:" + String(code), "Try Again");
@@ -488,7 +588,7 @@ void loop() {
       break;
 
     // ----------------------------------------
-    // Walk-in payment success
+    // Walk-in payment SUCCESS
     // ----------------------------------------
     case STATE_SUCCESS:
       if (stateJustChanged) {
@@ -496,23 +596,27 @@ void loop() {
         showLCD(line1, "Bal:Rs." + String(walletBalance));
         greenLED(true);
         buzzerValid();
+        // Grant IR authorization: passenger may now physically enter bus
+        irPassengerAuthorized = true;
+        irAuthGrantedAt       = millis();
+        Serial.println("[IR] Authorization granted for walk-in passenger");
         stateJustChanged = false;
       }
       if (elapsedTime >= 4000) { greenLED(false); changeState(STATE_STANDBY); }
       break;
 
     // ----------------------------------------
-    // Low balance: RED LED + 2-sec long buzzer + "Not a valid balance"
+    // Low balance
     // ----------------------------------------
     case STATE_LOW_BALANCE:
       if (stateJustChanged) {
         showLCD("Not a valid", "balance!");
         redLED(true);
-        buzzerInvalidLong(); // Turns buzzer ON (non-blocking)
+        buzzerInvalidLong();
         stateJustChanged = false;
       }
       if (elapsedTime >= 2000) {
-        digitalWrite(BUZZER_PIN, LOW); // Turn buzzer OFF after 2 sec
+        digitalWrite(BUZZER_PIN, LOW);
         redLED(false);
         changeState(STATE_STANDBY);
       }

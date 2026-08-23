@@ -743,6 +743,34 @@ app.post('/api/bookings/cancel/:bookingId', async (req, res) => {
   }
 });
 
+app.post('/api/bookings/send-ticket', async (req, res) => {
+  const { email, name, bookingId, busNumber, route, date, time, fare } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email required' });
+  
+  try {
+    await sendEmail(
+      email,
+      'SMARTBUS+ Booking Ticket',
+      `Your booking ${bookingId} has been confirmed.\n\nBus: ${busNumber}\nRoute: ${route || 'Walk-in'}\nFare: INR ${fare}`,
+      `<h3>SMARTBUS+ Walk-in Booking Confirmation</h3>
+       <p>Hello <b>${name || 'Passenger'}</b>,</p>
+       <p>Your bus booking is confirmed!</p>
+       <table style="width:100%; border-collapse: collapse; border: 1px solid #ddd; max-width: 500px; font-family: sans-serif;">
+         <tr style="background-color: #f2f2f2;"><th style="padding: 8px; text-align: left;" colspan="2">Ticket Details</th></tr>
+         <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><b>Booking ID:</b></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${bookingId}</td></tr>
+         <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><b>Bus:</b></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${busNumber}</td></tr>
+         <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><b>Route:</b></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${route || 'Walk-in Boarding'}</td></tr>
+         <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><b>Date/Time:</b></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${date || new Date().toLocaleDateString()} ${time || ''}</td></tr>
+         <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><b>Fare Paid:</b></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">INR ${fare} (Deducted from Wallet)</td></tr>
+       </table>
+       <p>Thank you for choosing SMARTBUS+!</p>`
+    );
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ==================== RFID CARD ROUTES ====================
 
 app.get('/api/rfid', async (req, res) => {

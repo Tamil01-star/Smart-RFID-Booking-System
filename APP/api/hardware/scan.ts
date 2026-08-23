@@ -7,6 +7,19 @@ function normalizeUID(uid: string): string {
   return uid.replace(/:/g, '').toUpperCase();
 }
 
+// Helper: Generate a seat number from a booking ID string
+// Produces seats like A01, A02 ... D10 (40 seats total, 4 rows of 10)
+function allocateSeat(bookingId: string): string {
+  let hash = 0;
+  for (let i = 0; i < bookingId.length; i++) {
+    hash = (hash * 31 + bookingId.charCodeAt(i)) & 0xffff;
+  }
+  const seatNum = (hash % 40) + 1;           // 1..40
+  const row     = String.fromCharCode(65 + Math.floor((seatNum - 1) / 10)); // A, B, C, D
+  const col     = ((seatNum - 1) % 10) + 1;  // 1..10
+  return `${row}${col.toString().padStart(2, '0')}`;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -50,12 +63,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const bookingRes = await query(`
       SELECT id, "bookingId", destination, fare, status
       FROM "Booking"
-      WHERE "passengerId" = $1 AND "busId" = $2 AND DATE("travelDate") >= CURRENT_DATE
+      WHERE "passengerId" = $1 
+        AND "busId" = $2 
+        AND DATE("travelDate") >= CURRENT_DATE
+        AND status IN ('confirmed', 'boarded')
       ORDER BY id DESC LIMIT 1
     `, [passengerId, bus_id]);
 
     if (bookingRes.rows.length === 0) {
-      // Registered card, but no ticket booked for today
+      // Registered card, but no active ticket booked for today
       return res.status(404).json({ success: false, message: 'No valid booking found for today' });
     }
 
@@ -64,10 +80,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 4. Prevent duplicate boarding
     if (booking.status === 'boarded') {
       return res.status(409).json({ success: false, message: 'Already Boarded' });
-    }
-
-    if (booking.status !== 'confirmed') {
-      return res.status(400).json({ success: false, message: 'Booking not confirmed' });
     }
 
     // =====================================================
@@ -126,13 +138,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       [cleanUID]
     );
 
-    // 8. Return success with destination as display info
+    // 8. Allocate a seat number deterministically from the booking ID
+    const seatNumber = allocateSeat(booking.bookingId);
+
+    // 9. Return success — LCD will show "Booked! Seat: A03"
     return res.status(200).json({
       success: true,
       message: 'Boarding Successful',
       passengerId,
       bookingId: booking.bookingId,
-      seatNumber: booking.destination || 'OK', // LCD shows destination city
+      seatNumber,
+      destination: booking.destination,
       fareDeducted: fareAmount
     });
 
