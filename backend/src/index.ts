@@ -579,7 +579,8 @@ app.get('/api/bookings', async (req, res) => {
 });
 
 app.post('/api/bookings/create', async (req, res) => {
-  const { passengerId, passengerName, busId, travelDate, rfidUid, source, destination } = req.body;
+  const { passengerId, passengerName, busId, travelDate, rfidUid, source, destination, bookingType } = req.body;
+  const isReserved = bookingType === 'reserved';
   try {
     const bus = await prisma.bus.findUnique({ where: { id: busId } });
     if (!bus) return res.status(404).json({ error: 'Bus not found' });
@@ -631,32 +632,37 @@ app.post('/api/bookings/create', async (req, res) => {
       bookingFare = Math.round(bookingFare);
     }
 
-    // Deduct fare from wallet
+    // Check Wallet Balance (for both types to ensure they can pay, but only deduct if reserved)
     let wallet = await prisma.wallet.findUnique({ where: { passengerId } });
     if (!wallet || wallet.balance < bookingFare) {
-      // Record failed transaction log
+      return res.status(400).json({ error: 'Insufficient wallet balance for this trip' });
+    }
+
+    // If Reserved, deduct fare immediately and decrement seat count
+    if (isReserved && bookingFare > 0) {
+      const newBalance = wallet.balance - bookingFare;
+      await prisma.wallet.update({ where: { passengerId }, data: { balance: newBalance } });
       await prisma.walletTransaction.create({
         data: {
           passengerId,
           type: 'FARE_DEDUCTION',
           amount: bookingFare,
-          description: `Fare deduction failed: Insufficient balance for ${bus.busNumber}`,
-          balanceBefore: wallet ? wallet.balance : 0.0,
-          balanceAfter: wallet ? wallet.balance : 0.0,
-          status: 'failed',
+          description: `Reserved Ticket Fare - ${bus.busNumber} to ${bookingDestination}`,
+          balanceBefore: wallet.balance,
+          balanceAfter: newBalance,
+          status: 'success',
           busNumber: bus.busNumber,
           rfidUid
         }
       });
-      return res.status(400).json({ error: 'Insufficient wallet balance' });
+      // Deduct seat
+      await prisma.bus.update({ 
+        where: { id: busId }, 
+        data: { availableSeats: bus.availableSeats - 1 } 
+      });
     }
 
-    // Update seats (fare is deducted only when scanning card on bus)
-    await prisma.bus.update({ 
-      where: { id: busId }, 
-      data: { availableSeats: bus.availableSeats - 1 } 
-    });
-
+    // Generate Booking ID
     const bookingId = `SBBK${Math.floor(10000000 + Math.random() * 90000000)}`;
     const booking = await prisma.booking.create({
       data: {
@@ -672,8 +678,9 @@ app.post('/api/bookings/create', async (req, res) => {
         arrivalTime: bus.arrivalTime,
         fare: bookingFare,
         status: 'confirmed',
+        bookingType: isReserved ? 'reserved' : 'unreserved',
         rfidUid,
-        rfidLinked: !!rfidUid
+        rfidLinked: false
       }
     });
 

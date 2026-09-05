@@ -61,7 +61,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // 3. Check for a valid booking for today on this bus
     const bookingRes = await query(`
-      SELECT id, "bookingId", destination, fare, status
+      SELECT id, "bookingId", destination, fare, status, "bookingType"
       FROM "Booking"
       WHERE "passengerId" = $1 
         AND "busId" = $2 
@@ -83,14 +83,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // =====================================================
-    // 5. DEDUCT WALLET - Fare is only deducted HERE when
-    //    the passenger physically taps their RFID card.
-    //    Online booking only reserves the seat (confirmed),
-    //    payment happens at the device gate.
+    // 5. DEDUCT WALLET
+    //    For 'unreserved': Fare is deducted now.
+    //    For 'reserved': Fare was deducted at online booking.
     // =====================================================
     const fareAmount = parseFloat(booking.fare) || 0;
 
-    if (fareAmount > 0) {
+    if (fareAmount > 0 && booking.bookingType !== 'reserved') {
       // Check current wallet balance
       const walletRes = await query(
         `SELECT balance FROM "Wallet" WHERE "passengerId" = $1`,

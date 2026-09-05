@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Bus, MapPin, Calendar, Search, Clock, Users, ArrowRight, CheckCircle } from 'lucide-react';
+import { Bus, MapPin, Calendar, Search, Clock, Users, ArrowRight, CheckCircle, Bookmark } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { busService, bookingService, rfidService } from '../../services';
 import { Bus as BusType, Booking } from '../../types';
@@ -11,6 +11,7 @@ export default function BookBus() {
   const [source, setSource] = useState('');
   const [destination, setDestination] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [bookingType, setBookingType] = useState<'reserved' | 'unreserved'>('unreserved');
   const [buses, setBuses] = useState<BusType[]>([]);
   const [searched, setSearched] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -96,11 +97,16 @@ export default function BookBus() {
       travelDate: date,
       rfidUid,
       source,
-      destination
+      destination,
+      bookingType
     });
     if (result.success && result.booking) {
       setConfirmedBooking(result.booking);
-      toast.success('Booking confirmed! ₹' + fare + ' deducted from wallet');
+      if (bookingType === 'reserved') {
+        toast.success(`Reserved ticket confirmed! ₹${result.booking.fare || fare} deducted from wallet.`);
+      } else {
+        toast.success(`Unreserved ticket booked! Fare will be deducted on boarding.`);
+      }
     } else {
       toast.error(result.error || 'Booking failed');
     }
@@ -200,6 +206,43 @@ export default function BookBus() {
             </button>
           </div>
         </div>
+
+        {/* Booking Type Toggle */}
+        <div className="mt-4 pt-4 border-t border-gray-100 flex flex-col sm:flex-row gap-4 items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-gray-700">Ticket Mode:</span>
+            <div className="inline-flex rounded-lg border border-gray-200 p-1 bg-gray-50">
+              <button
+                type="button"
+                onClick={() => setBookingType('reserved')}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                  bookingType === 'reserved'
+                    ? 'bg-primary-800 text-white shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Reserved (Instant Pay & Seat)
+              </button>
+              <button
+                type="button"
+                onClick={() => setBookingType('unreserved')}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                  bookingType === 'unreserved'
+                    ? 'bg-primary-800 text-white shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Unreserved (Pay on Boarding Tap)
+              </button>
+            </div>
+          </div>
+          <p className="text-xs text-gray-500">
+            {bookingType === 'reserved' 
+              ? '✨ Seat is allocated instantly and fare is deducted from wallet now.'
+              : '⚡ Seat and fare deduction will happen only when you tap your RFID card at the bus gate.'}
+          </p>
+        </div>
+      </div>
       </div>
 
       {/* Results */}
