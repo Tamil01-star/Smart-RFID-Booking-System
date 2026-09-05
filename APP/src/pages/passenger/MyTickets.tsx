@@ -46,15 +46,18 @@ function TicketModal({ booking, onClose }: { booking: Booking; onClose: () => vo
               ['Passenger', booking.passengerName],
               ['Passenger ID', booking.passengerId],
               ['Bus', booking.busNumber],
+              ['Booking Type', booking.bookingType === 'reserved' ? 'RESERVED (Paid Online)' : 'UNRESERVED (Pay on Boarding)'],
+              ['Seat Number', booking.seatNumber ? `${booking.seatNumber} (Reserved)` : 'Not Allocated (Assigned upon RFID boarding tap)'],
               ['Date', new Date(booking.travelDate).toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })],
               ['Departure', booking.departureTime],
               ['Arrival', booking.arrivalTime],
               ['Fare', `₹${booking.fare}`],
+              ['Payment', booking.bookingType === 'reserved' ? 'PAID (Wallet)' : 'Deducted on Boarding Tap'],
               ['RFID', booking.rfidLinked ? `✓ Linked (${booking.rfidUid})` : 'Not linked'],
             ].map(([label, value]) => (
-              <div key={label} className="flex justify-between text-sm">
+              <div key={label} className="flex justify-between text-sm py-0.5">
                 <span className="text-gray-500">{label}</span>
-                <span className="font-semibold text-gray-900">{value}</span>
+                <span className="font-semibold text-gray-900 text-right">{value}</span>
               </div>
             ))}
           </div>
@@ -145,10 +148,19 @@ export default function MyTickets() {
                       <span className="font-bold text-gray-900">{b.busNumber}</span>
                       <span className="ml-2 text-sm text-gray-500">{b.source} → {b.destination}</span>
                     </div>
-                    <span className={`ml-auto badge ${
-                      b.status === 'confirmed' ? 'badge-success' :
-                      b.status === 'completed' ? 'badge-info' : 'badge-error'
-                    }`}>{b.status.toUpperCase()}</span>
+                    <div className="ml-auto flex items-center gap-1.5">
+                      <span className={`badge text-xs ${
+                        b.bookingType === 'reserved' 
+                          ? 'bg-blue-50 text-blue-700 border-blue-200 font-bold' 
+                          : 'bg-amber-50 text-amber-700 border-amber-200 font-bold'
+                      }`}>
+                        {b.bookingType === 'reserved' ? (b.seatNumber ? `Seat ${b.seatNumber}` : 'Reserved') : 'Unreserved'}
+                      </span>
+                      <span className={`badge ${
+                        b.status === 'confirmed' ? 'badge-success' :
+                        b.status === 'completed' ? 'badge-info' : 'badge-error'
+                      }`}>{b.status.toUpperCase()}</span>
+                    </div>
                   </div>
                   <div className="flex flex-wrap gap-3 text-xs text-gray-500 ml-12">
                     <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{new Date(b.travelDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>

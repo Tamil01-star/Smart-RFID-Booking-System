@@ -67,6 +67,7 @@ model Booking {
   fare          Float
   status        String   @default("confirmed")
   bookingType   String   @default("unreserved")
+  seatNumber    String?
   rfidUid       String?
   rfidLinked    Boolean  @default(false)
   createdAt     DateTime @default(now())

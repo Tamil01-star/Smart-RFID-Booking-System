@@ -61,7 +61,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // 3. Check for a valid booking for today on this bus
     const bookingRes = await query(`
-      SELECT id, "bookingId", destination, fare, status, "bookingType"
+      SELECT id, "bookingId", destination, fare, status, "bookingType", "seatNumber"
       FROM "Booking"
       WHERE "passengerId" = $1 
         AND "busId" = $2 
@@ -82,54 +82,72 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(409).json({ success: false, message: 'Already Boarded' });
     }
 
-    // =====================================================
-    // 5. DEDUCT WALLET
-    //    For 'unreserved': Fare is deducted now.
-    //    For 'reserved': Fare was deducted at online booking.
-    // =====================================================
+    const isReserved = booking.bookingType === 'reserved';
     const fareAmount = parseFloat(booking.fare) || 0;
+    let seatNumber = booking.seatNumber;
 
-    if (fareAmount > 0 && booking.bookingType !== 'reserved') {
-      // Check current wallet balance
-      const walletRes = await query(
-        `SELECT balance FROM "Wallet" WHERE "passengerId" = $1`,
-        [passengerId]
-      );
+    // =====================================================
+    // 5. DEDUCT WALLET & ALLOCATE SEAT
+    //    For 'reserved': Seat already allocated, fare already paid online.
+    //                    RFID tap is ONLY for verification.
+    //    For 'unreserved': Fare is deducted NOW, seat allocated NOW.
+    // =====================================================
+    if (!isReserved) {
+      // Allocate seat for unreserved passenger upon boarding
+      seatNumber = allocateSeat(booking.bookingId);
 
-      if (walletRes.rows.length === 0) {
-        return res.status(402).json({ success: false, message: 'Wallet not found. Please top up.' });
+      if (fareAmount > 0) {
+        // Check current wallet balance
+        const walletRes = await query(
+          `SELECT balance FROM "Wallet" WHERE "passengerId" = $1`,
+          [passengerId]
+        );
+
+        if (walletRes.rows.length === 0) {
+          return res.status(402).json({ success: false, message: 'Wallet not found. Please top up.' });
+        }
+
+        const currentBalance = parseFloat(walletRes.rows[0].balance);
+
+        if (currentBalance < fareAmount) {
+          return res.status(402).json({
+            success: false,
+            message: 'Not a valid balance',
+            balance: currentBalance,
+            required: fareAmount
+          });
+        }
+
+        // Deduct fare from wallet
+        const newBalance = currentBalance - fareAmount;
+        await query(
+          `UPDATE "Wallet" SET balance = $1, "updatedAt" = CURRENT_TIMESTAMP WHERE "passengerId" = $2`,
+          [newBalance, passengerId]
+        );
+
+        // Log transaction in WalletTransaction
+        const tx_id = 'TX' + Date.now().toString().slice(-8);
+        await query(
+          `INSERT INTO "WalletTransaction" (id, "passengerId", amount, type, description, status, "balanceBefore", "balanceAfter", "busNumber", timestamp)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)`,
+          [tx_id, passengerId, fareAmount, 'DEBIT', `Unreserved Bus Fare - ${bus_number} to ${booking.destination}`, 'COMPLETED', currentBalance, newBalance, bus_number]
+        );
       }
 
-      const currentBalance = parseFloat(walletRes.rows[0].balance);
-
-      if (currentBalance < fareAmount) {
-        // Not enough balance - inform the ESP32 (402 = Payment Required)
-        return res.status(402).json({
-          success: false,
-          message: 'Not a valid balance',
-          balance: currentBalance,
-          required: fareAmount
-        });
+      // Decrement available seat count on the bus for unreserved boarding
+      await query(`UPDATE "Bus" SET "availableSeats" = GREATEST("availableSeats" - 1, 0) WHERE id = $1`, [bus_id]);
+    } else {
+      // If reserved, make sure seatNumber exists
+      if (!seatNumber) {
+        seatNumber = allocateSeat(booking.bookingId);
       }
-
-      // Deduct fare from wallet
-      const newBalance = currentBalance - fareAmount;
-      await query(
-        `UPDATE "Wallet" SET balance = $1, "updatedAt" = CURRENT_TIMESTAMP WHERE "passengerId" = $2`,
-        [newBalance, passengerId]
-      );
-
-      // Log transaction in WalletTransaction
-      const tx_id = 'TX' + Date.now().toString().slice(-8);
-      await query(
-        `INSERT INTO "WalletTransaction" (id, "passengerId", amount, type, description, status, "balanceBefore", "balanceAfter", "busNumber", timestamp)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)`,
-        [tx_id, passengerId, fareAmount, 'DEBIT', `Bus Fare - ${bus_number} to ${booking.destination}`, 'COMPLETED', currentBalance, newBalance, bus_number]
-      );
     }
 
-    // 6. Mark booking as boarded
-    await query(`UPDATE "Booking" SET status = 'boarded' WHERE id = $1`, [booking.id]);
+    // 6. Mark booking as boarded and store allocated seat
+    await query(
+      `UPDATE "Booking" SET status = 'boarded', "seatNumber" = $1, "rfidUid" = $2, "rfidLinked" = true WHERE id = $3`,
+      [seatNumber, cleanUID, booking.id]
+    );
 
     // 7. Update RFID last used timestamp
     await query(
@@ -137,18 +155,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       [cleanUID]
     );
 
-    // 8. Allocate a seat number deterministically from the booking ID
-    const seatNumber = allocateSeat(booking.bookingId);
-
-    // 9. Return success — LCD will show "Booked! Seat: A03"
+    // 8. Return success — LCD will show "Verified! Seat: A03" or "Booked! Seat: A03"
     return res.status(200).json({
       success: true,
-      message: 'Boarding Successful',
+      message: isReserved ? 'Reserved Ticket Verified' : 'Boarding & Payment Successful',
       passengerId,
       bookingId: booking.bookingId,
       seatNumber,
       destination: booking.destination,
-      fareDeducted: fareAmount
+      fareDeducted: isReserved ? 0 : fareAmount,
+      isReserved
     });
 
   } catch (error: any) {

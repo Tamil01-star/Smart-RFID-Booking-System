@@ -58,6 +58,8 @@ export interface Booking {
   arrivalTime: string;
   fare: number;
   status: BookingStatus;
+  bookingType?: 'reserved' | 'unreserved';
+  seatNumber?: string;
   rfidUid?: string;
   rfidLinked: boolean;
   createdAt: string;

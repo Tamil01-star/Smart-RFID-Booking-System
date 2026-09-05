@@ -662,8 +662,22 @@ app.post('/api/bookings/create', async (req, res) => {
       });
     }
 
-    // Generate Booking ID
+// Helper: Allocate seat for reserved tickets
+function allocateSeat(bookingId: string): string {
+  let hash = 0;
+  for (let i = 0; i < bookingId.length; i++) {
+    hash = (hash * 31 + bookingId.charCodeAt(i)) & 0xffff;
+  }
+  const seatNum = (hash % 40) + 1;
+  const row = String.fromCharCode(65 + Math.floor((seatNum - 1) / 10));
+  const col = ((seatNum - 1) % 10) + 1;
+  return `${row}${col.toString().padStart(2, '0')}`;
+}
+
+    // Generate Booking ID and allocate seat if reserved
     const bookingId = `SBBK${Math.floor(10000000 + Math.random() * 90000000)}`;
+    const allocatedSeat = isReserved ? allocateSeat(bookingId) : null;
+
     const booking = await prisma.booking.create({
       data: {
         bookingId,
@@ -679,33 +693,44 @@ app.post('/api/bookings/create', async (req, res) => {
         fare: bookingFare,
         status: 'confirmed',
         bookingType: isReserved ? 'reserved' : 'unreserved',
+        seatNumber: allocatedSeat,
         rfidUid,
         rfidLinked: false
       }
     });
 
-    await logEvent('success', `Booking ${bookingId} confirmed for ${passengerName} (${bookingSource} → ${bookingDestination})`, 'Booking Service');
+    await logEvent('success', `Booking ${bookingId} (${isReserved ? 'RESERVED' : 'UNRESERVED'}) confirmed for ${passengerName}`, 'Booking Service');
 
     // Send Booking Confirmation Email
     try {
       const user = await prisma.user.findFirst({ where: { passengerId } });
       if (user && user.email) {
+        const typeBadge = isReserved ? 'RESERVED (Paid Instantly)' : 'UNRESERVED (Pay on Boarding)';
+        const seatText = isReserved ? (allocatedSeat || 'Allocated') : 'Allocated upon RFID boarding tap';
+        const fareText = isReserved ? `INR ${bookingFare} (Paid from Wallet)` : `INR ${bookingFare} (To be deducted on boarding tap)`;
+        const noteText = isReserved 
+          ? 'Your seat is officially reserved! When boarding the bus, simply tap your RFID card for verification.'
+          : 'Your unreserved ticket is confirmed! When you tap your RFID card at the bus gate, the fare will be deducted and your seat will be allocated.';
+
         await sendEmail(
           user.email,
-          'SMARTBUS+ Booking Confirmation',
-          `Your booking ${bookingId} has been confirmed.\n\nTicket Details:\nBus: ${bus.busNumber} (${bus.busName})\nRoute: ${bookingSource} to ${bookingDestination}\nDate: ${travelDate}\nTime: ${bus.departureTime} - ${bus.arrivalTime}\nFare (to be deducted at boarding): INR ${bookingFare}`,
+          `SMARTBUS+ ${isReserved ? 'Reserved' : 'Unreserved'} Ticket Confirmation`,
+          `Your booking ${bookingId} has been confirmed.\n\nBus: ${bus.busNumber}\nSeat: ${seatText}\nFare: ${fareText}\n\n${noteText}`,
           `<h3>SMARTBUS+ Booking Confirmation</h3>
            <p>Hello <b>${passengerName}</b>,</p>
            <p>Your bus booking is confirmed!</p>
            <table style="width:100%; border-collapse: collapse; border: 1px solid #ddd; max-width: 500px; font-family: sans-serif;">
              <tr style="background-color: #f2f2f2;"><th style="padding: 8px; text-align: left;" colspan="2">Ticket Details</th></tr>
              <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><b>Booking ID:</b></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${bookingId}</td></tr>
+             <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><b>Booking Type:</b></td><td style="padding: 8px; border-bottom: 1px solid #ddd; font-weight: bold; color: ${isReserved ? '#1e3a8a' : '#d97706'};">${typeBadge}</td></tr>
+             <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><b>Seat Number:</b></td><td style="padding: 8px; border-bottom: 1px solid #ddd; font-weight: bold; font-size: 15px;">${seatText}</td></tr>
              <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><b>Bus:</b></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${bus.busNumber} (${bus.busName})</td></tr>
              <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><b>Route:</b></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${bookingSource} &rarr; ${bookingDestination}</td></tr>
              <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><b>Travel Date:</b></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${travelDate}</td></tr>
              <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><b>Timing:</b></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${bus.departureTime} - ${bus.arrivalTime}</td></tr>
-             <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><b>Fare to Deduct:</b></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">INR ${bookingFare} (on boarding tap)</td></tr>
+             <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><b>Fare:</b></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${fareText}</td></tr>
            </table>
+           <p style="margin-top: 15px; color: #555;"><i>${noteText}</i></p>
            <p>Thank you for choosing SMARTBUS+!</p>`
         );
       }

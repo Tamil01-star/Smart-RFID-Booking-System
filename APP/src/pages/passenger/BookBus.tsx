@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Bus, MapPin, Calendar, Search, Clock, Users, ArrowRight, CheckCircle, Bookmark } from 'lucide-react';
+import { Bus, MapPin, Calendar, Search, Clock, Users, ArrowRight, CheckCircle, Bookmark, CreditCard, ShieldCheck, Info, X, Check } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { busService, bookingService, rfidService } from '../../services';
+import { busService, bookingService, rfidService, walletService } from '../../services';
 import { Bus as BusType, Booking } from '../../types';
 import { CITIES } from '../../data/mockData';
 import toast from 'react-hot-toast';
@@ -18,11 +18,16 @@ export default function BookBus() {
   const [booking, setBooking] = useState<{ busId: string } | null>(null);
   const [confirmedBooking, setConfirmedBooking] = useState<Booking | null>(null);
   const [rfidUid, setRfidUid] = useState<string | undefined>();
+  const [walletBalance, setWalletBalance] = useState<number>(0);
+  const [pendingBookingBus, setPendingBookingBus] = useState<BusType | null>(null);
 
   useEffect(() => {
     if (user) {
       rfidService.getCardByPassenger(user.passengerId).then(card => {
         if (card?.status === 'active') setRfidUid(card.uid);
+      });
+      walletService.getWallet(user.passengerId).then(w => {
+        if (w) setWalletBalance(w.balance);
       });
     }
   }, [user]);
@@ -51,31 +56,30 @@ export default function BookBus() {
           toStop.order > fromStop.order) {
         const distanceKm = toStop.distance - fromStop.distance;
         let farePerKm = 2.00;
-        
         const type = (bus.busName || '').toLowerCase();
-        if (type.includes('ac')) {
-          farePerKm = 4.00;
-        } else if (type.includes('superfast') || type.includes('express')) {
-          farePerKm = 2.75;
-        } else {
-          farePerKm = 2.00;
-        }
-        
-        const calculatedFare = distanceKm * farePerKm;
-        return Math.round(calculatedFare / 5) * 5;
+        if (type.includes('ac')) farePerKm = 4.00;
+        else if (type.includes('superfast') || type.includes('express')) farePerKm = 2.75;
+        const calculated = distanceKm * farePerKm;
+        return Math.round(calculated / 5) * 5;
       }
     }
     return bus.fare;
   };
 
+  const getCategoryDiscountedFare = (baseFare: number) => {
+    if (!user || !user.category) return baseFare;
+    const cat = user.category.toLowerCase();
+    if (cat === 'student') return Math.round(baseFare * 0.50);
+    if (cat === 'senior_citizen' || cat === 'senior citizen') return Math.round(baseFare * 0.60);
+    if (cat === 'disabled_person' || cat === 'disabled') return Math.round(baseFare * 0.75);
+    if (cat === 'ex_serviceman' || cat === 'ex serviceman') return 0;
+    return baseFare;
+  };
+
   const getDynamicDistance = (bus: BusType) => {
     if (source && destination && bus.stopsWithFares && Array.isArray(bus.stopsWithFares)) {
-      const fromStop = bus.stopsWithFares.find(
-        (s: any) => s.stopName.toLowerCase() === source.toLowerCase()
-      );
-      const toStop = bus.stopsWithFares.find(
-        (s: any) => s.stopName.toLowerCase() === destination.toLowerCase()
-      );
+      const fromStop = bus.stopsWithFares.find((s: any) => s.stopName.toLowerCase() === source.toLowerCase());
+      const toStop = bus.stopsWithFares.find((s: any) => s.stopName.toLowerCase() === destination.toLowerCase());
       if (fromStop && toStop && 
           fromStop.order !== undefined && toStop.order !== undefined && 
           fromStop.distance !== undefined && toStop.distance !== undefined && 
@@ -86,10 +90,19 @@ export default function BookBus() {
     return null;
   };
 
-  const handleBook = async (bus: BusType) => {
-    if (!user) return;
+  const handleConfirmBooking = async () => {
+    if (!user || !pendingBookingBus) return;
+    const bus = pendingBookingBus;
     setBooking({ busId: bus.id });
-    const fare = getDynamicFare(bus);
+    const baseFare = getDynamicFare(bus);
+    const finalFare = getCategoryDiscountedFare(baseFare);
+
+    if (bookingType === 'reserved' && walletBalance < finalFare) {
+      toast.error(`Insufficient wallet balance! Current balance: ₹${walletBalance}, Required: ₹${finalFare}.`);
+      setBooking(null);
+      return;
+    }
+
     const result = await bookingService.createBooking({
       passengerId: user.passengerId,
       passengerName: user.name,
@@ -100,12 +113,15 @@ export default function BookBus() {
       destination,
       bookingType
     });
+
     if (result.success && result.booking) {
       setConfirmedBooking(result.booking);
+      setPendingBookingBus(null);
       if (bookingType === 'reserved') {
-        toast.success(`Reserved ticket confirmed! ₹${result.booking.fare || fare} deducted from wallet.`);
+        toast.success(`Reserved seat confirmed! ₹${result.booking.fare || finalFare} deducted from wallet.`);
+        setWalletBalance(prev => Math.max(0, prev - (result.booking?.fare || finalFare)));
       } else {
-        toast.success(`Unreserved ticket booked! Fare will be deducted on boarding.`);
+        toast.success(`Unreserved booking confirmed! Seat & fare (₹${result.booking.fare || finalFare}) will be processed on RFID boarding tap.`);
       }
     } else {
       toast.error(result.error || 'Booking failed');
@@ -121,28 +137,34 @@ export default function BookBus() {
             <CheckCircle className="w-9 h-9 text-green-500" />
           </div>
           <h2 className="text-2xl font-bold text-gray-900 mb-1">Booking Confirmed!</h2>
-          <p className="text-gray-500 text-sm mb-6">Your digital ticket is ready</p>
+          <p className="text-gray-500 text-sm mb-6">
+            {confirmedBooking.bookingType === 'reserved'
+              ? 'Your seat is reserved and fare is paid.'
+              : 'Unreserved ticket confirmed. Scan RFID card at bus to pay and get your seat.'}
+          </p>
 
           <div className="bg-primary-50 rounded-xl p-5 text-left space-y-3 mb-6">
             <div className="flex items-center justify-between border-b border-primary-100 pb-3">
               <span className="text-sm font-bold text-primary-900">SMARTBUS+</span>
-              <span className="badge badge-success">CONFIRMED</span>
+              <span className={`badge ${confirmedBooking.bookingType === 'reserved' ? 'badge-primary font-bold' : 'badge-warning font-bold'}`}>
+                {confirmedBooking.bookingType === 'reserved' ? 'RESERVED' : 'UNRESERVED'}
+              </span>
             </div>
             {[
               ['Booking ID', confirmedBooking.bookingId],
               ['Passenger', confirmedBooking.passengerName],
               ['Passenger ID', confirmedBooking.passengerId],
               ['Bus', confirmedBooking.busNumber],
-              ['From', confirmedBooking.source],
-              ['To', confirmedBooking.destination],
+              ['Route', `${confirmedBooking.source} → ${confirmedBooking.destination}`],
               ['Travel Date', new Date(confirmedBooking.travelDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })],
               ['Departure', confirmedBooking.departureTime],
-              ['Fare Paid', `₹${confirmedBooking.fare}`],
-              ['RFID', confirmedBooking.rfidLinked ? `Linked (${confirmedBooking.rfidUid})` : 'Not linked'],
+              ['Seat Number', confirmedBooking.seatNumber ? `${confirmedBooking.seatNumber} (Reserved)` : 'Not Allocated (Assigned upon RFID boarding tap)'],
+              ['Payment Status', confirmedBooking.bookingType === 'reserved' ? `PAID (₹${confirmedBooking.fare} deducted from wallet)` : `₹${confirmedBooking.fare} (Deducted when RFID scanned on bus)`],
+              ['RFID Verification', confirmedBooking.rfidLinked ? `Linked (${confirmedBooking.rfidUid})` : 'Will verify on tap'],
             ].map(([label, value]) => (
-              <div key={label} className="flex items-start justify-between text-sm">
-                <span className="text-gray-500">{label}</span>
-                <span className="font-semibold text-gray-900 text-right max-w-[60%]">{value}</span>
+              <div key={label} className="flex items-start justify-between text-sm py-1 border-b border-primary-100/40 last:border-0">
+                <span className="text-gray-500 font-medium">{label}</span>
+                <span className="font-semibold text-gray-900 text-right max-w-[65%]">{value}</span>
               </div>
             ))}
           </div>
@@ -316,13 +338,11 @@ export default function BookBus() {
             <div className="flex sm:flex-col items-center sm:items-end gap-4 sm:gap-3 sm:min-w-[130px]">
               <div className="text-3xl font-black text-primary-900">₹{getDynamicFare(bus)}</div>
               <button
-                onClick={() => handleBook(bus)}
+                onClick={() => setPendingBookingBus(bus)}
                 disabled={bus.status === 'full' || bus.availableSeats === 0 || booking?.busId === bus.id}
                 className="btn-primary sm:w-full justify-center"
               >
-                {booking?.busId === bus.id ? (
-                  <><span className="animate-spin inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full" /> Booking...</>
-                ) : bus.status === 'full' ? 'Bus Full' : (
+                {bus.status === 'full' ? 'Bus Full' : (
                   <>Book Ticket <ArrowRight className="w-4 h-4" /></>
                 )}
               </button>
@@ -336,6 +356,152 @@ export default function BookBus() {
           </div>
         </div>
       ))}
+
+      {/* Confirm Booking & Payment Modal */}
+      {pendingBookingBus && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5 border border-gray-100">
+            <div className="flex items-center justify-between pb-3 border-b border-gray-100">
+              <div className="flex items-center gap-2">
+                <CreditCard className="w-5 h-5 text-primary-700" />
+                <h3 className="text-lg font-bold text-gray-900">Confirm Booking & Payment</h3>
+              </div>
+              <button
+                onClick={() => setPendingBookingBus(null)}
+                className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Bus Summary */}
+            <div className="bg-gray-50 rounded-xl p-4 space-y-2 border border-gray-100 text-sm">
+              <div className="flex justify-between items-center">
+                <span className="font-bold text-gray-900 text-base">{pendingBookingBus.busNumber}</span>
+                <span className="text-xs text-gray-500 font-medium">{pendingBookingBus.busName}</span>
+              </div>
+              <div className="flex items-center gap-2 text-gray-700 font-medium">
+                <MapPin className="w-4 h-4 text-primary-600" />
+                <span>{source || pendingBookingBus.source} → {destination || pendingBookingBus.destination}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs text-gray-500 pt-1">
+                <span>Date: {new Date(date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                <span>Time: {pendingBookingBus.departureTime} - {pendingBookingBus.arrivalTime}</span>
+              </div>
+            </div>
+
+            {/* Booking Mode Selection */}
+            <div>
+              <label className="text-xs font-bold text-gray-600 uppercase tracking-wider block mb-2">
+                Select Booking Type
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setBookingType('reserved')}
+                  className={`p-3 rounded-xl border text-left transition-all ${
+                    bookingType === 'reserved'
+                      ? 'border-primary-600 bg-primary-50/70 ring-2 ring-primary-500/20 shadow-sm'
+                      : 'border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-bold text-gray-900 text-sm">Reserved</span>
+                    {bookingType === 'reserved' && <Check className="w-4 h-4 text-primary-700" />}
+                  </div>
+                  <p className="text-[11px] text-gray-500">
+                    Instant seat allocation + immediate wallet payment. RFID scan on bus is for verification only.
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setBookingType('unreserved')}
+                  className={`p-3 rounded-xl border text-left transition-all ${
+                    bookingType === 'unreserved'
+                      ? 'border-amber-600 bg-amber-50/70 ring-2 ring-amber-500/20 shadow-sm'
+                      : 'border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-bold text-gray-900 text-sm">Unreserved</span>
+                    {bookingType === 'unreserved' && <Check className="w-4 h-4 text-amber-700" />}
+                  </div>
+                  <p className="text-[11px] text-gray-500">
+                    No seat allocated now. Payment & seat assignment happen only when tapping RFID at the bus gate.
+                  </p>
+                </button>
+              </div>
+            </div>
+
+            {/* Fare & Wallet Breakdown */}
+            <div className="bg-blue-50/50 rounded-xl p-4 border border-blue-100 space-y-2.5 text-sm">
+              <div className="flex justify-between items-center text-gray-600">
+                <span>Base Fare:</span>
+                <span>₹{getDynamicFare(pendingBookingBus)}</span>
+              </div>
+
+              {user?.category && user.category !== 'general' && (
+                <div className="flex justify-between items-center text-green-700 text-xs font-semibold">
+                  <span>Category Discount ({user.category.replace('_', ' ').toUpperCase()}):</span>
+                  <span>-₹{getDynamicFare(pendingBookingBus) - getCategoryDiscountedFare(getDynamicFare(pendingBookingBus))}</span>
+                </div>
+              )}
+
+              <div className="flex justify-between items-center font-bold text-gray-900 text-base pt-1 border-t border-blue-100">
+                <span>Payable Fare:</span>
+                <span className="text-primary-800 text-xl font-black">
+                  ₹{getCategoryDiscountedFare(getDynamicFare(pendingBookingBus))}
+                </span>
+              </div>
+
+              <div className="pt-2 border-t border-blue-100/60 text-xs space-y-1">
+                <div className="flex justify-between text-gray-600">
+                  <span>Your Current Wallet Balance:</span>
+                  <span className="font-bold text-gray-900">₹{walletBalance}</span>
+                </div>
+                {bookingType === 'reserved' ? (
+                  <div className="flex justify-between text-gray-600">
+                    <span>Balance after payment:</span>
+                    <span className={`font-bold ${walletBalance < getCategoryDiscountedFare(getDynamicFare(pendingBookingBus)) ? 'text-red-600' : 'text-green-700'}`}>
+                      ₹{Math.max(0, walletBalance - getCategoryDiscountedFare(getDynamicFare(pendingBookingBus)))}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="text-amber-700 font-medium">
+                    ⚡ No money deducted now. ₹{getCategoryDiscountedFare(getDynamicFare(pendingBookingBus))} will be deducted when you tap your RFID card.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setPendingBookingBus(null)}
+                className="btn-secondary flex-1 justify-center py-2.5"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmBooking}
+                disabled={booking?.busId === pendingBookingBus.id || (bookingType === 'reserved' && walletBalance < getCategoryDiscountedFare(getDynamicFare(pendingBookingBus)))}
+                className="btn-primary flex-1 justify-center py-2.5 font-bold shadow-lg"
+              >
+                {booking?.busId === pendingBookingBus.id ? (
+                  <><span className="animate-spin inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full" /> Processing...</>
+                ) : bookingType === 'reserved' ? (
+                  `Confirm & Pay ₹${getCategoryDiscountedFare(getDynamicFare(pendingBookingBus))}`
+                ) : (
+                  `Confirm Unreserved Ticket`
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
