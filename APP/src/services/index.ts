@@ -143,6 +143,7 @@ export const transactionService = {
     rfidUid?: string;
     source?: string;
     destination?: string;
+    bookingType?: string;
   }): Promise<{ success: boolean; booking?: Booking; error?: string }> => {
     try {
       const res = await fetch(`${API_URL}/bookings/create`, {
