@@ -619,6 +619,18 @@ app.post('/api/bookings/create', async (req, res) => {
       }
     }
 
+    // Fetch user to get category for discount
+    const user = await prisma.user.findFirst({ where: { passengerId } });
+    if (user && user.category) {
+      const cat = user.category.toLowerCase();
+      if (cat === 'student') bookingFare = bookingFare * 0.50; // 50% discount
+      else if (cat === 'senior_citizen') bookingFare = bookingFare * 0.60; // 40% discount (pays 60%)
+      else if (cat === 'disabled_person') bookingFare = bookingFare * 0.75; // 25% discount (pays 75%)
+      else if (cat === 'ex_serviceman') bookingFare = 0; // Free
+      
+      bookingFare = Math.round(bookingFare);
+    }
+
     // Deduct fare from wallet
     let wallet = await prisma.wallet.findUnique({ where: { passengerId } });
     if (!wallet || wallet.balance < bookingFare) {

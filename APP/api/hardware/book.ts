@@ -63,7 +63,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     
     const balance = parseFloat(walletRes.rows[0].balance);
-    const fareAmount = parseFloat(fare);
+    let fareAmount = parseFloat(fare);
+
+    // 3.5 Apply Category Discount
+    const userCatRes = await query(`SELECT category FROM "User" WHERE "passengerId" = $1`, [passengerId]);
+    if (userCatRes.rows.length > 0 && userCatRes.rows[0].category) {
+      const cat = userCatRes.rows[0].category.toLowerCase();
+      if (cat === 'student') fareAmount = fareAmount * 0.50;
+      else if (cat === 'senior_citizen') fareAmount = fareAmount * 0.60;
+      else if (cat === 'disabled_person') fareAmount = fareAmount * 0.75;
+      else if (cat === 'ex_serviceman') fareAmount = 0;
+      
+      fareAmount = Math.round(fareAmount);
+    }
 
     if (balance < fareAmount) {
       return res.status(402).json({ success: false, message: 'Not a valid balance', balance });

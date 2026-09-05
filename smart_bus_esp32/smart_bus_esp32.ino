@@ -75,6 +75,16 @@ const int cumulativeDist[NUM_STOPS] = {
 enum BusType { ORDINARY = 0, EXPRESS = 1 };
 BusType currentBusType = EXPRESS;
 
+// Passenger Category enum for discounts
+enum PassengerCategory {
+  CAT_GENERAL = 1,
+  CAT_STUDENT = 2,
+  CAT_SENIOR = 3,
+  CAT_DISABLED = 4,
+  CAT_EX_SERVICEMAN = 5
+};
+PassengerCategory currentCategory = CAT_GENERAL;
+
 // ==========================================
 // MAIN STATE MACHINE DEFINITION
 // ==========================================
@@ -86,6 +96,7 @@ enum SystemState {
   STATE_RFID_INVALID,
   STATE_RFID_ALREADY_BOARDED,
   STATE_WALKIN_PROMPT,
+  STATE_SELECT_CATEGORY,
   STATE_SELECT_DEST,
   STATE_CONFIRM_BOOKING,
   STATE_CHECKING_WALLET,
@@ -258,14 +269,29 @@ int processPayment(String uid, int fareAmount, String &outSeat, int &outBalance)
 }
 
 // ==========================================
-// FARE CALCULATOR
+// FARE CALCULATOR & DISCOUNTS
 // ==========================================
-int calculateFare(int fromIdx, int toIdx, BusType type) {
+// Removed PassengerCategory from here to fix Arduino preprocessor error
+
+int calculateFare(int fromIdx, int toIdx, BusType type, PassengerCategory cat) {
   if (fromIdx >= toIdx) return 0;
   int dist = cumulativeDist[toIdx] - cumulativeDist[fromIdx];
   int ratePerKm = (type == EXPRESS) ? 2 : 1;
-  int fare = dist * ratePerKm;
-  return ((fare + 4) / 5) * 5;
+  float baseFare = dist * ratePerKm;
+  float finalFare = baseFare;
+  
+  switch(cat) {
+    case CAT_STUDENT:       finalFare = baseFare * 0.50; break; // 50% discount
+    case CAT_SENIOR:        finalFare = baseFare * 0.60; break; // 40% discount
+    case CAT_DISABLED:      finalFare = baseFare * 0.75; break; // 25% discount
+    case CAT_EX_SERVICEMAN: finalFare = 0.0; break;             // 100% discount (Free)
+    case CAT_GENERAL:
+    default:                finalFare = baseFare; break;        // 100% fare (Full)
+  }
+  
+  int fareInt = (int)finalFare;
+  // Round to nearest 5
+  return ((fareInt + 4) / 5) * 5;
 }
 
 // ==========================================
@@ -537,6 +563,30 @@ void loop() {
           showLCD("Dest: " + String(stopNames[idx]), "# to confirm");
         }
       }
+      if (key == '#') changeState(STATE_SELECT_CATEGORY);
+      if (key == 'C') changeState(STATE_STANDBY);
+      if (elapsedTime >= 30000) changeState(STATE_TIMEOUT);
+      break;
+
+    // ----------------------------------------
+    // WALK-IN: Select Discount Category
+    // ----------------------------------------
+    case STATE_SELECT_CATEGORY:
+      if (stateJustChanged) {
+        currentCategory = CAT_GENERAL;
+        showLCD("1Gn 2St 3Sr 4Ds", "5Ex, press # OK");
+        stateJustChanged = false;
+      }
+      if (key >= '1' && key <= '5') {
+        currentCategory = (PassengerCategory)(key - '0');
+        String catName = "";
+        if (key == '1') catName = "General (Full)";
+        else if (key == '2') catName = "Student (50%)";
+        else if (key == '3') catName = "Senior (40%)";
+        else if (key == '4') catName = "Disabled (25%)";
+        else if (key == '5') catName = "Ex-Service(Free)";
+        showLCD("Cat: " + catName, "# to confirm");
+      }
       if (key == '#') changeState(STATE_CONFIRM_BOOKING);
       if (key == 'C') changeState(STATE_STANDBY);
       if (elapsedTime >= 30000) changeState(STATE_TIMEOUT);
@@ -547,7 +597,7 @@ void loop() {
     // ----------------------------------------
     case STATE_CONFIRM_BOOKING:
       if (stateJustChanged) {
-        int fare = calculateFare(currentBoardingIndex, currentDestIndex, currentBusType);
+        int fare = calculateFare(currentBoardingIndex, currentDestIndex, currentBusType, currentCategory);
         showLCD("To:" + String(stopNames[currentDestIndex]), "Rs." + String(fare) + " #=Pay C=Cxl");
         stateJustChanged = false;
       }
@@ -561,14 +611,14 @@ void loop() {
     // ----------------------------------------
     case STATE_CHECKING_WALLET:
       if (stateJustChanged) {
-        int fare = calculateFare(currentBoardingIndex, currentDestIndex, currentBusType);
+        int fare = calculateFare(currentBoardingIndex, currentDestIndex, currentBusType, currentCategory);
         showLCD("Rs." + String(fare) + " Due", "Tap Card to Pay");
         stateJustChanged = false;
       }
       if (readRFID(lastScannedUID)) {
         buzzerCardRead();
         showLCD("Processing...", "Please Wait");
-        int fare = calculateFare(currentBoardingIndex, currentDestIndex, currentBusType);
+        int fare = calculateFare(currentBoardingIndex, currentDestIndex, currentBusType, currentCategory);
         int code = processPayment(lastScannedUID, fare, assignedSeat, walletBalance);
         Serial.print("Payment API code: "); Serial.println(code);
 
