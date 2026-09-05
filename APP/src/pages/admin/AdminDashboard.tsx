@@ -3,6 +3,8 @@ import { Users, Bus, Ticket, TrendingUp, CreditCard, Cpu, ArrowUpRight, AlertCir
 import { Link } from 'react-router-dom';
 import { busService, bookingService, transactionService, rfidService } from '../../services';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import EdgeAIPassengerMonitor from '../../components/EdgeAIPassengerMonitor';
+import { API_URL } from '../../config';
 
 const COLORS = ['#1e3a8a', '#3b82f6', '#60a5fa', '#93c5fd'];
 
@@ -18,42 +20,27 @@ export default function AdminDashboard() {
   const [bookingsData, setBookingsData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Simple localStorage helpers for layout stats
-  const getLocalStorageData = () => {
-    try {
-      const storedUsers = localStorage.getItem('smartbus_users');
-      if (storedUsers) {
-        const users = JSON.parse(storedUsers);
-        setPassengers(users.filter((u: any) => u.role === 'passenger').length);
-      } else {
-        setPassengers(0);
-      }
-
-      const storedLogs = localStorage.getItem('smartbus_logs');
-      if (storedLogs) {
-        setLogs(JSON.parse(storedLogs));
-      } else {
-        setLogs([]);
-      }
-    } catch {
-      setPassengers(0);
-      setLogs([]);
-    }
-  };
-
   useEffect(() => {
-    getLocalStorageData();
     Promise.all([
       busService.getBuses(),
       bookingService.getBookings(),
       transactionService.getTransactions(),
       rfidService.getRFIDCards(),
-    ]).then(([b, bk, t, r]) => {
+      fetch(`${API_URL}/users`).then(res => res.ok ? res.json() : []).catch(() => []),
+      fetch(`${API_URL}/logs`).then(res => res.ok ? res.json() : []).catch(() => []),
+    ]).then(([b, bk, t, r, usersList, logsList]) => {
       setBuses(b.length);
       setBusesList(b);
       setBookings(bk.length);
       setTxns(t.length);
       setRfidCards(r.filter(c => c.status === 'active').length);
+      if (Array.isArray(usersList)) {
+        const passengerCount = usersList.filter((u: any) => u.role === 'passenger').length;
+        setPassengers(passengerCount);
+      }
+      if (Array.isArray(logsList)) {
+        setLogs(logsList);
+      }
       setBookingsData(bk);
       setLoading(false);
     });
@@ -156,7 +143,6 @@ export default function AdminDashboard() {
         <h1 className="page-title">Admin Dashboard</h1>
         <p className="page-subtitle">System overview and statistics</p>
       </div>
-
       {/* Stats Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
         {statCards.map(card => {
@@ -175,6 +161,9 @@ export default function AdminDashboard() {
           );
         })}
       </div>
+
+      {/* Edge AI Passenger Monitor */}
+      <EdgeAIPassengerMonitor />
 
       {/* Stop-by-Stop Passenger Drop-off Board (Getting Down Count) */}
       <div className="card p-6">

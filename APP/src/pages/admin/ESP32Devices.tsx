@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Cpu, Wifi, Hash, Monitor, Speaker, Zap } from 'lucide-react';
 import { esp32Service } from '../../services';
+import EdgeAIPassengerMonitor from '../../components/EdgeAIPassengerMonitor';
 
 function ComponentStatus({ label, status }: { label: string; status: string }) {
   const isOk = status === 'ready' || status === 'connected' || status === 'online';
@@ -84,6 +85,9 @@ export default function ESP32Devices() {
           </div>
         )}
       </div>
+
+      {/* Edge AI Passenger Flow & Telemetry Monitor */}
+      <EdgeAIPassengerMonitor />
 
       <div className="card p-5">
         <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">

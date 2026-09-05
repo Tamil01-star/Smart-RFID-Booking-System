@@ -174,3 +174,28 @@ export interface PassengerStats {
   rfidLinked: boolean;
   rfidUid?: string;
 }
+
+// ==================== EDGE AI / TINYML TYPES ====================
+export interface EdgeAIPassengerData {
+  totalEntries: number;
+  totalExits: number;
+  currentPassengers: number;
+  availableSeats: number;
+  eventType: 'ENTRY' | 'EXIT' | 'ABNORMAL' | 'NO_EVENT';
+  confidence: number;
+  sensorSequence: string;
+  movementDuration: number;
+  lastEventTime: string;
+  abnormalCount: number;
+  unauthorizedEntryCount: number;
+  lastUnauthorizedEvent: string;
+  authorizationStatus: string;
+  bookedPassengers: number;
+  actualPassengers: number;
+  occupancyMismatch: boolean;
+  occupancyStatus: string;
+  inferenceLocation: string;
+  deviceStatus?: string;
+  lastSeen?: string;
+}
+
