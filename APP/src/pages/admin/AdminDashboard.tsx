@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Users, Bus, Ticket, TrendingUp, CreditCard, Cpu, ArrowUpRight, AlertCircle, MapPin, DollarSign } from 'lucide-react';
+import { Users, Bus, Ticket, TrendingUp, CreditCard, Cpu, ArrowUpRight, AlertCircle, MapPin, DollarSign, ArrowDownCircle, UserCheck } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { busService, bookingService, transactionService, rfidService } from '../../services';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
@@ -8,6 +8,8 @@ const COLORS = ['#1e3a8a', '#3b82f6', '#60a5fa', '#93c5fd'];
 
 export default function AdminDashboard() {
   const [buses, setBuses] = useState<number>(0);
+  const [busesList, setBusesList] = useState<any[]>([]);
+  const [selectedBusId, setSelectedBusId] = useState<string>('all');
   const [bookings, setBookings] = useState<number>(0);
   const [txns, setTxns] = useState<number>(0);
   const [rfidCards, setRfidCards] = useState<number>(0);
@@ -48,6 +50,7 @@ export default function AdminDashboard() {
       rfidService.getRFIDCards(),
     ]).then(([b, bk, t, r]) => {
       setBuses(b.length);
+      setBusesList(b);
       setBookings(bk.length);
       setTxns(t.length);
       setRfidCards(r.filter(c => c.status === 'active').length);
@@ -105,6 +108,46 @@ export default function AdminDashboard() {
     .sort((a, b) => b.collection - a.collection)
     .slice(0, 6);
 
+  // Find selected bus (if any) for detailed stop-by-stop passenger breakdown
+  const selectedBus = busesList.find(b => b.id === selectedBusId || b.busNumber === selectedBusId);
+
+  // Detailed stop-by-stop drop-off list
+  let detailedStopsList: { name: string; count: number; order?: number; fare?: number }[] = [];
+
+  if (selectedBus && selectedBus.stopsWithFares && selectedBus.stopsWithFares.length > 0) {
+    // Show all stops of this bus in route order
+    detailedStopsList = selectedBus.stopsWithFares.map((s: any) => {
+      const count = bookingsData.filter(bk => 
+        bk.status !== 'cancelled' &&
+        (bk.busId === selectedBus.id || bk.busNumber === selectedBus.busNumber) &&
+        bk.destination && bk.destination.trim().toLowerCase() === s.stopName.trim().toLowerCase()
+      ).length;
+      return {
+        name: s.stopName,
+        count,
+        order: s.order,
+        fare: s.fare
+      };
+    });
+  } else {
+    // Show all stops across all buses
+    const allKnownStops = new Set<string>();
+    busesList.forEach(b => {
+      if (b.stopsWithFares) {
+        b.stopsWithFares.forEach((sf: any) => allKnownStops.add(sf.stopName));
+      }
+    });
+    Object.keys(dropOffMap).forEach(s => allKnownStops.add(s));
+
+    detailedStopsList = Array.from(allKnownStops).map((stopName, idx) => ({
+      name: stopName,
+      count: dropOffMap[stopName] || 0,
+      order: idx + 1
+    })).sort((a, b) => b.count - a.count);
+  }
+
+  const totalDropOffs = detailedStopsList.reduce((sum, s) => sum + s.count, 0);
+
   if (loading) return <div className="flex justify-center py-20"><div className="animate-spin rounded-full h-10 w-10 border-4 border-primary-800 border-t-transparent" /></div>;
 
   return (
@@ -131,6 +174,83 @@ export default function AdminDashboard() {
             </Link>
           );
         })}
+      </div>
+
+      {/* Stop-by-Stop Passenger Drop-off Board (Getting Down Count) */}
+      <div className="card p-6">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-5 pb-4 border-b border-gray-100">
+          <div>
+            <div className="flex items-center gap-2">
+              <ArrowDownCircle className="w-5 h-5 text-primary-700" />
+              <h2 className="text-lg font-bold text-gray-900">Passenger Drop-Offs by Stop</h2>
+            </div>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Exact count of passengers getting down at each stop in the route
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 self-stretch sm:self-auto">
+            <span className="text-xs font-semibold text-gray-500 whitespace-nowrap">Filter Bus:</span>
+            <select
+              value={selectedBusId}
+              onChange={e => setSelectedBusId(e.target.value)}
+              className="input text-xs py-1.5 px-3 bg-gray-50 border-gray-200"
+            >
+              <option value="all">All Buses ({busesList.length})</option>
+              {busesList.map(b => (
+                <option key={b.id} value={b.id}>
+                  {b.busNumber} ({b.source} → {b.destination})
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Detailed One-by-One Stop Cards */}
+        {detailedStopsList.length === 0 ? (
+          <div className="p-8 text-center text-gray-400 text-sm">
+            No stops configured for the selected bus.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {detailedStopsList.map((stop, idx) => (
+              <div
+                key={stop.name}
+                className={`p-4 rounded-xl border transition-all ${
+                  stop.count > 0
+                    ? 'bg-blue-50/60 border-blue-200 shadow-sm'
+                    : 'bg-gray-50/70 border-gray-100 opacity-80'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">
+                    Stop #{stop.order || idx + 1}
+                  </span>
+                  <span className={`badge ${stop.count > 0 ? 'badge-success font-bold text-xs' : 'badge-gray text-xs'}`}>
+                    {stop.count > 0 ? `${stop.count} Getting Down` : '0 Getting Down'}
+                  </span>
+                </div>
+                <div className="text-base font-bold text-gray-900 flex items-center gap-1.5">
+                  <MapPin className="w-4 h-4 text-primary-600 flex-shrink-0" />
+                  <span>{stop.name}</span>
+                </div>
+                {stop.count > 0 && totalDropOffs > 0 && (
+                  <div className="mt-3">
+                    <div className="w-full bg-blue-200/60 h-1.5 rounded-full overflow-hidden">
+                      <div
+                        className="bg-primary-600 h-full rounded-full transition-all"
+                        style={{ width: `${Math.max(10, Math.round((stop.count / totalDropOffs) * 100))}%` }}
+                      />
+                    </div>
+                    <div className="text-[11px] text-gray-500 mt-1 text-right">
+                      {Math.round((stop.count / totalDropOffs) * 100)}% of passengers
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Charts */}
