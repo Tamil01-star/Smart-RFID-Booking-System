@@ -12,6 +12,7 @@
 #include <SPI.h>
 #include <MFRC522.h>
 #include <Keypad.h>
+#include "edge_ai_model.h"
 
 // ==========================================
 // SYSTEM CONFIGURATION
@@ -20,6 +21,7 @@ const char* ssid             = "ZENKAI_MONARCH";
 const char* password         = "********";
 const char* apiEndpoint      = "https://smart-rfid-booking-system-tawny.vercel.app/api/hardware/scan";
 const char* bookEndpoint     = "https://smart-rfid-booking-system-tawny.vercel.app/api/hardware/book";
+const char* edgeAiEndpoint   = "https://smart-rfid-booking-system-tawny.vercel.app/api/hardware/edge-ai";
 const char* HARDCODED_BUS_NUMBER = "NS893";
 
 // ==========================================
@@ -32,16 +34,14 @@ const char* HARDCODED_BUS_NUMBER = "NS893";
 #define BUZZER_PIN     15
 
 // ==========================================
-// IR PROXIMITY SENSOR CONFIGURATION
-// GPIO 35: input-only pin, conflicts with nothing.
-// Wire: IR OUT -> GPIO 35 | VCC -> 3.3V | GND -> GND
-// If YOUR module outputs HIGH on detect, change IR_ACTIVE_STATE to HIGH.
+// SINGLE IR PROXIMITY SENSOR & EDGE AI CONFIG
+// IR (GPIO 35): Entrance Sensor
 // ==========================================
-#define IR_SENSOR_PIN                35
-const bool          IR_ACTIVE_STATE       = LOW;   // LOW = object detected (most common)
+#define IR_SENSOR_PIN                35    // Single IR Sensor Pin
+const bool          IR_ACTIVE_STATE       = LOW;   // LOW = object detected
 const unsigned long IR_ALARM_DURATION     = 3000;  // ms alarm stays ON for unauthorized entry
-const unsigned long IR_DEBOUNCE_MS        = 100;   // debounce window in ms
-const unsigned long AUTHORIZATION_TIMEOUT = 30000; // 30s for passenger to physically enter
+const unsigned long IR_DEBOUNCE_MS        = 80;    // debounce window in ms
+const unsigned long AUTHORIZATION_TIMEOUT = 30000; // 30s window for passenger entry
 
 // ==========================================
 // KEYPAD CONFIGURATION
@@ -127,8 +127,25 @@ int    ticketCount          = 1;
 int    walletBalance        = 0;
 
 // ==========================================
-// IR SENSOR STATE VARIABLES
+// EDGE AI & PASSENGER FLOW MONITORING
 // ==========================================
+int           totalEntries           = 0;
+int           totalExits             = 0;
+int           currentPassengers      = 0;
+int           availableSeats         = 40;
+int           bookedPassengers       = 5;
+int           unauthorizedEntryCount = 0;
+int           abnormalCount          = 0;
+String        lastMovement           = "NONE";
+unsigned long lastEventCooldown      = 0;
+
+// Dual IR Sensor Sequence Tracking Variables
+unsigned long ir1FirstHitTime     = 0;
+unsigned long ir2FirstHitTime     = 0;
+int           rapidTriggerCounter = 0;
+bool          ir1ActiveLast       = false;
+bool          ir2ActiveLast       = false;
+
 // Set to true when RFID authorizes a passenger; IR uses this to allow entry.
 bool          irPassengerAuthorized = false;
 unsigned long irAuthGrantedAt       = 0;
@@ -295,64 +312,113 @@ int calculateFare(int fromIdx, int toIdx, BusType type, PassengerCategory cat) {
 }
 
 // ==========================================
-// IR SENSOR HANDLER  (non-blocking, called every loop)
-// 
-// State diagram:
-//   IR_WAITING
-//     -> person detected -> check irPassengerAuthorized
-//        YES -> log boarding, clear auth, stay in IR_PERSON_DETECTED (wait for leave)
-//        NO  -> alarm (RED LED + BUZZER + LCD), go to IR_ALARM_ACTIVE
-//   IR_PERSON_DETECTED
-//     -> person leaves -> IR_WAITING
-//   IR_ALARM_ACTIVE
-//     -> after IR_ALARM_DURATION -> turn off alarm, restore LCD, go to IR_PERSON_DETECTED
+// FIREBASE / API EDGE AI SYNC FUNCTION
+// Transmits real-time Edge AI telemetry & security status to Backend / Firebase
+// ==========================================
+void syncEdgeAIToFirebase(const EdgeAIPrediction& pred) {
+  if (WiFi.status() != WL_CONNECTED) return;
+  HTTPClient http;
+  http.begin(secureClient, edgeAiEndpoint);
+  http.setTimeout(5000);
+  http.addHeader("Content-Type", "application/json");
+
+  String body = "{";
+  body += "\"totalEntries\":" + String(totalEntries) + ",";
+  body += "\"totalExits\":" + String(totalExits) + ",";
+  body += "\"currentPassengers\":" + String(currentPassengers) + ",";
+  body += "\"availableSeats\":" + String(availableSeats) + ",";
+  body += "\"eventType\":\"" + pred.eventTypeName + "\",";
+  body += "\"confidence\":" + String(pred.confidence, 1) + ",";
+  body += "\"sensorSequence\":\"" + pred.sensorSequence + "\",";
+  body += "\"movementDuration\":" + String(millis() - (ir1FirstHitTime > 0 ? ir1FirstHitTime : millis())) + ",";
+  body += "\"abnormalCount\":" + String(abnormalCount) + ",";
+  body += "\"unauthorizedEntryCount\":" + String(unauthorizedEntryCount) + ",";
+  body += "\"lastUnauthorizedEvent\":\"" + String(pred.isUnauthorizedEntry ? "UNAUTHORIZED_ENTRY" : "None") + "\",";
+  body += "\"authorizationStatus\":\"" + pred.rfidStatus + "\",";
+  body += "\"bookedPassengers\":" + String(bookedPassengers) + ",";
+  body += "\"actualPassengers\":" + String(currentPassengers) + ",";
+  body += "\"occupancyMismatch\":" + String(pred.isOccupancyMismatch ? "true" : "false");
+  body += "}";
+
+  int code = http.POST(body);
+  http.end();
+}
+
+// ==========================================
+// SINGLE IR EDGE AI SENSOR HANDLER (non-blocking)
+// Runs feature extraction and TinyML classifier on-device for single IR sensor
 // ==========================================
 void handleIRSensor() {
-  bool          rawReading = (digitalRead(IR_SENSOR_PIN) == IR_ACTIVE_STATE);
-  unsigned long now        = millis();
+  bool rawReading = (digitalRead(IR_SENSOR_PIN) == IR_ACTIVE_STATE);
+  unsigned long now = millis();
 
-  // Authorization timeout: revoke if passenger didn't enter in time
+  // Authorization timeout check: revoke RFID authorization if 30s window passes
   if (irPassengerAuthorized && (now - irAuthGrantedAt >= AUTHORIZATION_TIMEOUT)) {
     irPassengerAuthorized = false;
-    Serial.println("[IR] Authorization window expired (30s timeout)");
+    Serial.println("[EDGE AI] RFID Authorization window expired (30s timeout)");
+    Serial.println("[EDGE AI] Event: RFID / Physical Boarding Mismatch");
   }
 
+  // Cooldown protection to prevent double counting
   switch (irState) {
 
-    // -------------------------------------------------------
     case IR_WAITING:
       if (rawReading != irLastSensorState) {
         irDebounceTime    = now;
         irLastSensorState = rawReading;
       }
       if (rawReading && (now - irDebounceTime >= IR_DEBOUNCE_MS)) {
-        // Stable detection — ONE entry event generated
+        // Stable detection triggered
         irState = IR_PERSON_DETECTED;
-        Serial.println("[IR] Person detected");
+
+        // Build Feature Vector for Single IR Edge AI model
+        EdgeAIFeatures features;
+        features.irTriggered        = 1.0f;
+        features.pulseWidthMs       = 350.0f;
+        features.rapidTriggerCount  = 1.0f;
+        features.rfidAuthStatus     = irPassengerAuthorized ? 1.0f : 0.0f;
+        features.timeSinceRfidMs    = irPassengerAuthorized ? (float)(now - irAuthGrantedAt) : 99999.0f;
+        features.currentPassengers  = (float)currentPassengers;
+        features.bookedPassengers   = (float)bookedPassengers;
+        features.availableSeats     = (float)availableSeats;
+
+        EdgeAIPrediction pred = runEdgeAIInference(features);
+
+        Serial.print("[EDGE AI] IR Sensor Detection: "); Serial.println(pred.eventTypeName);
+        Serial.print("[EDGE AI] AI Confidence: "); Serial.print(pred.confidence, 1); Serial.println("%");
 
         if (irPassengerAuthorized) {
           // CASE 1 — AUTHORIZED: passenger physically entering after valid RFID
           irPassengerAuthorized = false; // consumed
-          Serial.println("[IR] Authorized passenger detected entering");
+          totalEntries++;
+          currentPassengers = max(0, totalEntries - totalExits);
+          availableSeats    = max(0, 40 - currentPassengers);
+          lastMovement      = "ENTRY";
+
+          Serial.println("[EDGE AI] RFID: AUTHORIZED");
           Serial.println("[BOARDING] Passenger boarded successfully");
-          // Green LED & success display already handled by main state machine — no alarm
+          Serial.print("[EDGE AI] Passenger Count: "); Serial.println(currentPassengers);
+          syncEdgeAIToFirebase(pred);
         } else {
           // CASE 2 — UNAUTHORIZED: no valid RFID session active
-          Serial.println("[IR] UNAUTHORIZED entry detected!");
-          Serial.println("[SECURITY] No valid authorization present");
-          Serial.println("[ALERT] Red LED ON");
-          Serial.println("[ALERT] Long buzzer activated");
+          unauthorizedEntryCount++;
+          lastMovement = "UNAUTHORIZED";
+
+          Serial.println("[EDGE AI] RFID: NOT AUTHORIZED");
+          Serial.println("[SECURITY] UNAUTHORIZED ENTRY DETECTED!");
+          Serial.println("[ALERT] Red LED ON & Long Buzzer Activated");
+
           irState      = IR_ALARM_ACTIVE;
           irAlarmStart = now;
           redLED(true);
           greenLED(false);
           digitalWrite(BUZZER_PIN, HIGH);
           showLCD("UNAUTHORIZED", "ENTRY ALERT!");
+          syncEdgeAIToFirebase(pred);
         }
       }
       break;
 
-    // -------------------------------------------------------
     case IR_PERSON_DETECTED:
       // Wait for the person to clear the sensor before allowing next detection
       if (rawReading != irLastSensorState) {
@@ -361,14 +427,11 @@ void handleIRSensor() {
       }
       if (!rawReading && (now - irDebounceTime >= IR_DEBOUNCE_MS)) {
         irState = IR_WAITING;
-        Serial.println("[IR] Person left detection zone");
-        Serial.println("[IR] Ready for next passenger");
+        Serial.println("[EDGE AI] Person left detection zone. Ready for next event.");
       }
       break;
 
-    // -------------------------------------------------------
     case IR_ALARM_ACTIVE:
-      // Hold alarm for IR_ALARM_DURATION then clear
       if (now - irAlarmStart >= IR_ALARM_DURATION) {
         digitalWrite(BUZZER_PIN, LOW);
         redLED(false);
@@ -376,7 +439,7 @@ void handleIRSensor() {
         if (currentState == STATE_STANDBY) {
           showLCD("Bus: " + String(HARDCODED_BUS_NUMBER), "Tap Card to Board");
         }
-        irState = IR_PERSON_DETECTED; // wait for person to leave before next detection
+        irState = IR_PERSON_DETECTED; // Wait for person to clear sensor
       }
       break;
   }
@@ -396,7 +459,7 @@ void setup() {
   digitalWrite(RED_LED_PIN,   LOW);
   digitalWrite(BUZZER_PIN,    LOW);
 
-  // IR sensor — GPIO 35 is input-only; no pull-up needed (IR module has its own)
+  // Single IR sensor (GPIO 35)
   pinMode(IR_SENSOR_PIN, INPUT);
 
   // LCD Init

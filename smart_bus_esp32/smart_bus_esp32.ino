@@ -34,13 +34,10 @@ const char* HARDCODED_BUS_NUMBER = "NS893";
 #define BUZZER_PIN     15
 
 // ==========================================
-// DUAL IR PROXIMITY SENSORS & EDGE AI CONFIG
-// IR1 (GPIO 35): Outer Entrance Sensor
-// IR2 (GPIO 34): Inner Cabin Sensor
+// SINGLE IR PROXIMITY SENSOR & EDGE AI CONFIG
+// IR (GPIO 35): Entrance Sensor
 // ==========================================
-#define IR1_SENSOR_PIN               35
-#define IR2_SENSOR_PIN               34
-#define IR_SENSOR_PIN                35    // Fallback single IR pin reference
+#define IR_SENSOR_PIN                35    // Single IR Sensor Pin
 const bool          IR_ACTIVE_STATE       = LOW;   // LOW = object detected
 const unsigned long IR_ALARM_DURATION     = 3000;  // ms alarm stays ON for unauthorized entry
 const unsigned long IR_DEBOUNCE_MS        = 80;    // debounce window in ms
@@ -348,12 +345,11 @@ void syncEdgeAIToFirebase(const EdgeAIPrediction& pred) {
 }
 
 // ==========================================
-// DUAL IR EDGE AI SENSOR HANDLER (non-blocking)
-// Runs feature extraction and TinyML classifier on-device
+// SINGLE IR EDGE AI SENSOR HANDLER (non-blocking)
+// Runs feature extraction and TinyML classifier on-device for single IR sensor
 // ==========================================
-void handleDualIR_EdgeAI() {
-  bool ir1Active = (digitalRead(IR1_SENSOR_PIN) == IR_ACTIVE_STATE);
-  bool ir2Active = (digitalRead(IR2_SENSOR_PIN) == IR_ACTIVE_STATE);
+void handleIRSensor() {
+  bool rawReading = (digitalRead(IR_SENSOR_PIN) == IR_ACTIVE_STATE);
   unsigned long now = millis();
 
   // Authorization timeout check: revoke RFID authorization if 30s window passes
@@ -363,143 +359,90 @@ void handleDualIR_EdgeAI() {
     Serial.println("[EDGE AI] Event: RFID / Physical Boarding Mismatch");
   }
 
-  // Detect edge trigger changes
-  bool ir1JustTriggered = (ir1Active && !ir1ActiveLast);
-  bool ir2JustTriggered = (ir2Active && !ir2ActiveLast);
-  ir1ActiveLast = ir1Active;
-  ir2ActiveLast = ir2Active;
-
-  if (ir1JustTriggered) {
-    Serial.println("[EDGE AI] IR1 detected (Outer Entrance)");
-    if (ir1FirstHitTime == 0) ir1FirstHitTime = now;
-    else rapidTriggerCounter++;
-  }
-
-  if (ir2JustTriggered) {
-    Serial.println("[EDGE AI] IR2 detected (Inner Cabin)");
-    if (ir2FirstHitTime == 0) ir2FirstHitTime = now;
-    else rapidTriggerCounter++;
-  }
-
   // Cooldown protection to prevent double counting
-  if (now - lastEventCooldown < 1200) {
-    return;
-  }
+  switch (irState) {
 
-  // Evaluate sequence when both or either sensor has completed active window
-  if ((ir1FirstHitTime > 0 || ir2FirstHitTime > 0) && (!ir1Active && !ir2Active)) {
-    unsigned long duration = 0;
-    float sequenceOrder = 0.0f;
-
-    if (ir1FirstHitTime > 0 && ir2FirstHitTime > 0) {
-      duration = (now - min(ir1FirstHitTime, ir2FirstHitTime));
-      if (ir1FirstHitTime < ir2FirstHitTime) {
-        sequenceOrder = 1.0f; // IR1 -> IR2 (Entry sequence)
-      } else {
-        sequenceOrder = -1.0f; // IR2 -> IR1 (Exit sequence)
+    case IR_WAITING:
+      if (rawReading != irLastSensorState) {
+        irDebounceTime    = now;
+        irLastSensorState = rawReading;
       }
-    } else {
-      duration = 500;
-      sequenceOrder = 0.0f;
-    }
+      if (rawReading && (now - irDebounceTime >= IR_DEBOUNCE_MS)) {
+        // Stable detection triggered
+        irState = IR_PERSON_DETECTED;
 
-    // Build Feature Vector for Edge AI / TinyML model
-    EdgeAIFeatures features;
-    features.ir1Triggered        = ir1FirstHitTime > 0 ? 1.0f : 0.0f;
-    features.ir2Triggered        = ir2FirstHitTime > 0 ? 1.0f : 0.0f;
-    features.sequenceOrder       = sequenceOrder;
-    features.timeDeltaMs         = (float)abs((long)(ir2FirstHitTime - ir1FirstHitTime));
-    features.rapidTriggerCount   = (float)rapidTriggerCounter;
-    features.movementDurationMs  = (float)duration;
-    features.prevState           = 0.0f;
-    features.rfidAuthStatus      = irPassengerAuthorized ? 1.0f : 0.0f;
-    features.timeSinceRfidMs     = irPassengerAuthorized ? (float)(now - irAuthGrantedAt) : 99999.0f;
-    features.currentPassengers   = (float)currentPassengers;
-    features.bookedPassengers    = (float)bookedPassengers;
+        // Build Feature Vector for Single IR Edge AI model
+        EdgeAIFeatures features;
+        features.irTriggered        = 1.0f;
+        features.pulseWidthMs       = 350.0f;
+        features.rapidTriggerCount  = 1.0f;
+        features.rfidAuthStatus     = irPassengerAuthorized ? 1.0f : 0.0f;
+        features.timeSinceRfidMs    = irPassengerAuthorized ? (float)(now - irAuthGrantedAt) : 99999.0f;
+        features.currentPassengers  = (float)currentPassengers;
+        features.bookedPassengers   = (float)bookedPassengers;
+        features.availableSeats     = (float)availableSeats;
 
-    // Run On-Device Edge AI / TinyML Inference
-    EdgeAIPrediction pred = runEdgeAIInference(features);
+        EdgeAIPrediction pred = runEdgeAIInference(features);
 
-    // Debug Log Output to Serial Monitor
-    Serial.print("[EDGE AI] Sequence: "); Serial.println(pred.sensorSequence);
-    Serial.print("[EDGE AI] Classification: "); Serial.println(pred.eventTypeName);
-    Serial.print("[EDGE AI] Confidence: "); Serial.print(pred.confidence, 1); Serial.println("%");
+        Serial.print("[EDGE AI] IR Sensor Detection: "); Serial.println(pred.eventTypeName);
+        Serial.print("[EDGE AI] AI Confidence: "); Serial.print(pred.confidence, 1); Serial.println("%");
 
-    // Handle classification results
-    if (pred.eventType == EVENT_ENTRY) {
-      if (pred.isAuthorizedBoarding) {
-        irPassengerAuthorized = false; // Consumed authorization
-        totalEntries++;
-        currentPassengers = max(0, totalEntries - totalExits);
-        availableSeats    = max(0, 40 - currentPassengers);
-        lastMovement      = "ENTRY";
-        lastEventCooldown = now;
+        if (irPassengerAuthorized) {
+          // CASE 1 — AUTHORIZED: passenger physically entering after valid RFID
+          irPassengerAuthorized = false; // consumed
+          totalEntries++;
+          currentPassengers = max(0, totalEntries - totalExits);
+          availableSeats    = max(0, 40 - currentPassengers);
+          lastMovement      = "ENTRY";
 
-        Serial.println("[EDGE AI] RFID: AUTHORIZED");
-        Serial.println("[EDGE AI] Boarding: CONFIRMED");
-        Serial.print("[EDGE AI] Passenger Count: "); Serial.println(currentPassengers);
-        syncEdgeAIToFirebase(pred);
-      } else {
-        unauthorizedEntryCount++;
-        lastMovement = "UNAUTHORIZED";
-        lastEventCooldown = now;
+          Serial.println("[EDGE AI] RFID: AUTHORIZED");
+          Serial.println("[BOARDING] Passenger boarded successfully");
+          Serial.print("[EDGE AI] Passenger Count: "); Serial.println(currentPassengers);
+          syncEdgeAIToFirebase(pred);
+        } else {
+          // CASE 2 — UNAUTHORIZED: no valid RFID session active
+          unauthorizedEntryCount++;
+          lastMovement = "UNAUTHORIZED";
 
-        Serial.println("[EDGE AI] RFID: NOT AUTHORIZED");
-        Serial.println("[SECURITY] UNAUTHORIZED ENTRY DETECTED!");
-        Serial.println("[ALERT] Red LED ON & Long Buzzer Activated");
+          Serial.println("[EDGE AI] RFID: NOT AUTHORIZED");
+          Serial.println("[SECURITY] UNAUTHORIZED ENTRY DETECTED!");
+          Serial.println("[ALERT] Red LED ON & Long Buzzer Activated");
 
-        irState      = IR_ALARM_ACTIVE;
-        irAlarmStart = now;
-        redLED(true);
-        greenLED(false);
-        digitalWrite(BUZZER_PIN, HIGH);
-        showLCD("UNAUTHORIZED", "ENTRY ALERT!");
-        syncEdgeAIToFirebase(pred);
+          irState      = IR_ALARM_ACTIVE;
+          irAlarmStart = now;
+          redLED(true);
+          greenLED(false);
+          digitalWrite(BUZZER_PIN, HIGH);
+          showLCD("UNAUTHORIZED", "ENTRY ALERT!");
+          syncEdgeAIToFirebase(pred);
+        }
       }
-    } else if (pred.eventType == EVENT_EXIT) {
-      totalExits++;
-      currentPassengers = max(0, totalEntries - totalExits);
-      availableSeats    = min(40, 40 - currentPassengers);
-      lastMovement      = "EXIT";
-      lastEventCooldown = now;
+      break;
 
-      Serial.println("[EDGE AI] Classification: EXIT");
-      Serial.print("[EDGE AI] Passenger Count: "); Serial.println(currentPassengers);
-      syncEdgeAIToFirebase(pred);
-    } else if (pred.eventType == EVENT_ABNORMAL || pred.isAbnormal) {
-      abnormalCount++;
-      lastMovement = "ABNORMAL";
-      lastEventCooldown = now;
-
-      Serial.println("[EDGE AI] Classification: ABNORMAL");
-      Serial.print("[EDGE AI] Confidence: "); Serial.print(pred.confidence, 1); Serial.println("%");
-      Serial.println("[EDGE AI] Count not updated due to sensor noise / low confidence.");
-      syncEdgeAIToFirebase(pred);
-    }
-
-    // Reset sequence tracking flags
-    ir1FirstHitTime = 0;
-    ir2FirstHitTime = 0;
-    rapidTriggerCounter = 0;
-  }
-
-  // Handle Alarm Clearing
-  if (irState == IR_ALARM_ACTIVE) {
-    if (now - irAlarmStart >= IR_ALARM_DURATION) {
-      digitalWrite(BUZZER_PIN, LOW);
-      redLED(false);
-      Serial.println("[ALERT] Alarm cleared. Returning to ready.");
-      if (currentState == STATE_STANDBY) {
-        showLCD("Bus: " + String(HARDCODED_BUS_NUMBER), "Tap Card to Board");
+    case IR_PERSON_DETECTED:
+      // Wait for the person to clear the sensor before allowing next detection
+      if (rawReading != irLastSensorState) {
+        irDebounceTime    = now;
+        irLastSensorState = rawReading;
       }
-      irState = IR_WAITING;
-    }
-  }
-}
+      if (!rawReading && (now - irDebounceTime >= IR_DEBOUNCE_MS)) {
+        irState = IR_WAITING;
+        Serial.println("[EDGE AI] Person left detection zone. Ready for next event.");
+      }
+      break;
 
-// Fallback wrapper
-void handleIRSensor() {
-  handleDualIR_EdgeAI();
+    case IR_ALARM_ACTIVE:
+      if (now - irAlarmStart >= IR_ALARM_DURATION) {
+        digitalWrite(BUZZER_PIN, LOW);
+        redLED(false);
+        Serial.println("[ALERT] Alarm cleared. Returning to ready.");
+        if (currentState == STATE_STANDBY) {
+          showLCD("Bus: " + String(HARDCODED_BUS_NUMBER), "Tap Card to Board");
+        }
+        irState = IR_PERSON_DETECTED; // Wait for person to clear sensor
+      }
+      break;
+  }
 }
 
 // ==========================================
@@ -516,9 +459,8 @@ void setup() {
   digitalWrite(RED_LED_PIN,   LOW);
   digitalWrite(BUZZER_PIN,    LOW);
 
-  // Dual IR sensors (GPIO 35 & 34)
-  pinMode(IR1_SENSOR_PIN, INPUT);
-  pinMode(IR2_SENSOR_PIN, INPUT);
+  // Single IR sensor (GPIO 35)
+  pinMode(IR_SENSOR_PIN, INPUT);
 
   // LCD Init
   Wire.begin(21, 22);

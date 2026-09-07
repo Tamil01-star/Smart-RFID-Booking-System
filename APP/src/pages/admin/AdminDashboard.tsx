@@ -3,7 +3,6 @@ import { Users, Bus, Ticket, TrendingUp, CreditCard, Cpu, ArrowUpRight, AlertCir
 import { Link } from 'react-router-dom';
 import { busService, bookingService, transactionService, rfidService } from '../../services';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import EdgeAIPassengerMonitor from '../../components/EdgeAIPassengerMonitor';
 import { API_URL } from '../../config';
 
 const COLORS = ['#1e3a8a', '#3b82f6', '#60a5fa', '#93c5fd'];
@@ -161,9 +160,6 @@ export default function AdminDashboard() {
           );
         })}
       </div>
-
-      {/* Edge AI Passenger Monitor */}
-      <EdgeAIPassengerMonitor />
 
       {/* Stop-by-Stop Passenger Drop-off Board (Getting Down Count) */}
       <div className="card p-6">
