@@ -73,8 +73,8 @@ export default function AdminDashboard() {
   
   bookingsData.forEach(b => {
     if (b.status !== 'cancelled') {
-      // Drop-off counting
-      if (b.destination) {
+      // Drop-off counting (exclude any generic walk-in destinations)
+      if (b.destination && !b.destination.toLowerCase().includes('walk-in') && !b.destination.toLowerCase().includes('current stop')) {
         dropOffMap[b.destination] = (dropOffMap[b.destination] || 0) + 1;
       }
       // Total collection by bus
@@ -85,6 +85,7 @@ export default function AdminDashboard() {
   });
 
   const dropOffData = Object.entries(dropOffMap)
+    .filter(([stop]) => !stop.toLowerCase().includes('walk-in') && !stop.toLowerCase().includes('current stop'))
     .map(([stop, count]) => ({ stop, count }))
     .sort((a, b) => b.count - a.count)
     .slice(0, 6);
@@ -101,35 +102,47 @@ export default function AdminDashboard() {
   let detailedStopsList: { name: string; count: number; order?: number; fare?: number }[] = [];
 
   if (selectedBus && selectedBus.stopsWithFares && selectedBus.stopsWithFares.length > 0) {
-    // Show all stops of this bus in route order
-    detailedStopsList = selectedBus.stopsWithFares.map((s: any) => {
-      const count = bookingsData.filter(bk => 
-        bk.status !== 'cancelled' &&
-        (bk.busId === selectedBus.id || bk.busNumber === selectedBus.busNumber) &&
-        bk.destination && bk.destination.trim().toLowerCase() === s.stopName.trim().toLowerCase()
-      ).length;
-      return {
-        name: s.stopName,
-        count,
-        order: s.order,
-        fare: s.fare
-      };
-    });
+    // Show all valid stops of this bus in route order
+    detailedStopsList = selectedBus.stopsWithFares
+      .filter((s: any) => s.stopName && !s.stopName.toLowerCase().includes('walk-in') && !s.stopName.toLowerCase().includes('current stop'))
+      .map((s: any) => {
+        const count = bookingsData.filter(bk => 
+          bk.status !== 'cancelled' &&
+          (bk.busId === selectedBus.id || bk.busNumber === selectedBus.busNumber) &&
+          bk.destination && bk.destination.trim().toLowerCase() === s.stopName.trim().toLowerCase()
+        ).length;
+        return {
+          name: s.stopName,
+          count,
+          order: s.order,
+          fare: s.fare
+        };
+      });
   } else {
-    // Show all stops across all buses
+    // Show all stops across all buses (excluding any walk-in placeholder)
     const allKnownStops = new Set<string>();
     busesList.forEach(b => {
       if (b.stopsWithFares) {
-        b.stopsWithFares.forEach((sf: any) => allKnownStops.add(sf.stopName));
+        b.stopsWithFares.forEach((sf: any) => {
+          if (sf.stopName && !sf.stopName.toLowerCase().includes('walk-in') && !sf.stopName.toLowerCase().includes('current stop')) {
+            allKnownStops.add(sf.stopName);
+          }
+        });
       }
     });
-    Object.keys(dropOffMap).forEach(s => allKnownStops.add(s));
+    Object.keys(dropOffMap).forEach(s => {
+      if (!s.toLowerCase().includes('walk-in') && !s.toLowerCase().includes('current stop')) {
+        allKnownStops.add(s);
+      }
+    });
 
-    detailedStopsList = Array.from(allKnownStops).map((stopName, idx) => ({
-      name: stopName,
-      count: dropOffMap[stopName] || 0,
-      order: idx + 1
-    })).sort((a, b) => b.count - a.count);
+    detailedStopsList = Array.from(allKnownStops)
+      .filter(stopName => !stopName.toLowerCase().includes('walk-in') && !stopName.toLowerCase().includes('current stop'))
+      .map((stopName, idx) => ({
+        name: stopName,
+        count: dropOffMap[stopName] || 0,
+        order: idx + 1
+      })).sort((a, b) => b.count - a.count);
   }
 
   const totalDropOffs = detailedStopsList.reduce((sum, s) => sum + s.count, 0);

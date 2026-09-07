@@ -24,7 +24,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { uid, bus_number, fare } = req.body;
+  const { uid, bus_number, fare, destination, source } = req.body;
 
   if (!uid || !bus_number || fare === undefined) {
     return res.status(400).json({ error: 'Missing uid, bus_number, or fare' });
@@ -33,12 +33,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const cleanUID = normalizeUID(uid);
 
   try {
-    // 1. Lookup bus_id from bus_number
-    const busRes = await query(`SELECT id FROM "Bus" WHERE "busNumber" = $1`, [bus_number]);
+    // 1. Lookup bus from bus_number
+    const busRes = await query(`SELECT id, source, destination, "stopsWithFares" FROM "Bus" WHERE "busNumber" = $1`, [bus_number]);
     if (busRes.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Bus not found' });
     }
-    const bus_id = busRes.rows[0].id;
+    const bus = busRes.rows[0];
+    const bus_id = bus.id;
 
     // 2. Check if RFID card exists and is active
     const cardRes = await query(
@@ -90,30 +91,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     await query(
       `INSERT INTO "WalletTransaction" (id, "passengerId", amount, type, description, status, "balanceBefore", "balanceAfter", "busNumber", timestamp)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)`,
-      [tx_id, passengerId, fareAmount, 'DEBIT', `Walk-in Bus Fare (${bus_number})`, 'COMPLETED', balance, newBalance, bus_number]
+      [tx_id, passengerId, fareAmount, 'DEBIT', `Manual Bus Fare (${bus_number})`, 'COMPLETED', balance, newBalance, bus_number]
     );
 
-    // 6. Create Booking (Automatically Marked as Boarded)
+    // 6. Resolve destination (NEVER use 'Walk-in Dest', match actual bus stop)
+    let bookingDestination = destination;
+    let bookingSource = source || bus.source || 'Salem';
+
+    if (!bookingDestination || bookingDestination.toLowerCase().includes('walk-in')) {
+      if (bus.stopsWithFares && Array.isArray(bus.stopsWithFares)) {
+        const rawFare = parseFloat(fare);
+        const matched = bus.stopsWithFares.find((s: any) => s.fare && Math.abs(s.fare - rawFare) < 25);
+        if (matched) {
+          bookingDestination = matched.stopName;
+        }
+      }
+      if (!bookingDestination || bookingDestination.toLowerCase().includes('walk-in')) {
+        bookingDestination = bus.destination || 'Thiruvananthapuram';
+      }
+    }
+
+    // 7. Allocate seat number
     const booking_id = 'W' + Date.now().toString().slice(-6);
     const b_id = 'B' + Date.now().toString();
+    const seatNumber = allocateSeat(booking_id);
 
+    // 8. Create Booking with real destination and assigned seat
     await query(`
       INSERT INTO "Booking" (
         id, "bookingId", "passengerId", "passengerName", "busId", "busNumber", 
         source, destination, "travelDate", "departureTime", "arrivalTime", 
-        fare, status, "rfidLinked", "createdAt"
+        fare, status, "bookingType", "seatNumber", "rfidLinked", "createdAt"
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_DATE, $9, $10, $11, 'boarded', true, CURRENT_TIMESTAMP)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_DATE, $9, $10, $11, 'boarded', 'unreserved', $12, true, CURRENT_TIMESTAMP)
     `, [
-      b_id, booking_id, passengerId, 'Walk-in Passenger', bus_id, bus_number, 
-      'Current Stop', 'Walk-in Dest', '00:00', '23:59', fareAmount
+      b_id, booking_id, passengerId, 'Passenger', bus_id, bus_number, 
+      bookingSource, bookingDestination, '00:00', '23:59', fareAmount, seatNumber
     ]);
 
-    // 7. Update RFID last used
+    // 9. Update RFID last used
     await query(`UPDATE "RFIDCard" SET "lastUsedAt" = CURRENT_TIMESTAMP WHERE UPPER(uid) = $1`, [cleanUID]);
-
-    // 8. Allocate a seat number from the booking ID
-    const seatNumber = allocateSeat(booking_id);
 
     // 9. Send Email Ticket (Trigger Backend API)
     try {
