@@ -45,12 +45,16 @@ export default function AdminDashboard() {
     });
   }, []);
 
+  const totalRevenue = bookingsData
+    .filter(b => b.status !== 'cancelled')
+    .reduce((sum, b) => sum + (b.fare || 0), 0);
+
   const statCards = [
+    { label: 'Total Revenue', value: `₹${totalRevenue.toLocaleString('en-IN')}`, icon: DollarSign, color: 'green', link: '/admin/collections' },
     { label: 'Total Passengers', value: passengers, icon: Users, color: 'blue', link: '/admin/passengers' },
     { label: 'Total Buses', value: buses, icon: Bus, color: 'indigo', link: '/admin/buses' },
-    { label: 'Total Bookings', value: bookings, icon: Ticket, color: 'green', link: '/admin/bookings' },
+    { label: 'Total Bookings', value: bookings, icon: Ticket, color: 'teal', link: '/admin/bookings' },
     { label: 'Transactions', value: txns, icon: TrendingUp, color: 'purple', link: '/admin/transactions' },
-    { label: 'Active RFID Cards', value: rfidCards, icon: CreditCard, color: 'teal', link: '/admin/rfid' },
     { label: 'ESP32 Devices', value: 1, icon: Cpu, color: 'amber', link: '/admin/devices' },
   ];
 
@@ -256,9 +260,14 @@ export default function AdminDashboard() {
         
         {/* Drop-off Chart */}
         <div className="card p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <MapPin className="w-5 h-5 text-primary-700" />
-            <h3 className="font-semibold text-gray-900">Passenger Drop-offs by Stop</h3>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <MapPin className="w-5 h-5 text-primary-700" />
+              <h3 className="font-semibold text-gray-900">Passenger Drop-offs by Stop</h3>
+            </div>
+            <Link to="/admin/collections" className="text-xs font-bold text-primary-700 hover:text-primary-800 flex items-center gap-1 bg-primary-50 px-2.5 py-1 rounded-md border border-primary-200">
+              View Stop Revenue <ArrowUpRight className="w-3.5 h-3.5" />
+            </Link>
           </div>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={dropOffData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }} layout="vertical">
@@ -276,9 +285,14 @@ export default function AdminDashboard() {
 
         {/* Bus Collection Chart */}
         <div className="card p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <DollarSign className="w-5 h-5 text-green-600" />
-            <h3 className="font-semibold text-gray-900">Total Collection by Bus</h3>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <DollarSign className="w-5 h-5 text-green-600" />
+              <h3 className="font-semibold text-gray-900">Total Collection by Bus</h3>
+            </div>
+            <Link to="/admin/collections" className="text-xs font-bold text-green-700 hover:text-green-800 flex items-center gap-1 bg-green-50 px-2.5 py-1 rounded-md border border-green-200">
+              Open Full Revenue Screen <ArrowUpRight className="w-3.5 h-3.5" />
+            </Link>
           </div>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={collectionData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>

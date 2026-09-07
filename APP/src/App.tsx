@@ -29,6 +29,7 @@ import PassengerManagement from './pages/admin/PassengerManagement';
 import AdminRFIDManagement from './pages/admin/AdminRFIDManagement';
 import BookingManagement from './pages/admin/BookingManagement';
 import TransactionMonitoring from './pages/admin/TransactionMonitoring';
+import CollectionManagement from './pages/admin/CollectionManagement';
 import ESP32Devices from './pages/admin/ESP32Devices';
 import SystemLogs from './pages/admin/SystemLogs';
 import Settings from './pages/admin/Settings';
@@ -84,6 +85,7 @@ function AppRoutes() {
         <Route path="rfid" element={<AdminRFIDManagement />} />
         <Route path="bookings" element={<BookingManagement />} />
         <Route path="transactions" element={<TransactionMonitoring />} />
+        <Route path="collections" element={<CollectionManagement />} />
         <Route path="devices" element={<ESP32Devices />} />
         <Route path="logs" element={<SystemLogs />} />
         <Route path="settings" element={<Settings />} />

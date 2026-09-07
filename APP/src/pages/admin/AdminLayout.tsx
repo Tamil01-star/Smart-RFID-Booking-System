@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate, Link } from 'react-router-dom';
 import {
   Bus, LayoutDashboard, Users, CreditCard, Ticket, History,
-  Cpu, FileText, Settings, LogOut, Menu, X, MapPin, Zap
+  Cpu, FileText, Settings, LogOut, Menu, X, MapPin, Zap, DollarSign
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
@@ -15,6 +15,7 @@ const adminNavItems = [
   { to: '/admin/passengers', icon: Users, label: 'Passengers' },
   { to: '/admin/rfid', icon: CreditCard, label: 'RFID Cards' },
   { to: '/admin/bookings', icon: Ticket, label: 'Bookings' },
+  { to: '/admin/collections', icon: DollarSign, label: 'Collections' },
   { to: '/admin/transactions', icon: History, label: 'Transactions' },
   { to: '/admin/devices', icon: Cpu, label: 'ESP32 Devices' },
   { to: '/admin/logs', icon: FileText, label: 'System Logs' },
